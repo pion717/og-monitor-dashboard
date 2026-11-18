@@ -1,0 +1,2560 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>日常数据监控看板</title>
+<script src="libs/xlsx.full.min.js"></script>
+<script src="libs/chart.umd.min.js"></script>
+<script src="libs/chartjs-plugin-datalabels.min.js"></script>
+<script src="libs/html2canvas.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;background:#f0f2f5;color:#333}
+.header{background:linear-gradient(135deg,#e67e22,#d35400);color:#fff;padding:18px 30px;display:flex;justify-content:space-between;align-items:center}
+.header h1{font-size:22px;font-weight:600}
+.header .subtitle{font-size:13px;opacity:.85;margin-top:4px}
+.header-right{display:flex;align-items:center;gap:15px}
+.data-info{font-size:12px;background:rgba(255,255,255,.18);padding:6px 14px;border-radius:16px}
+.container{max-width:1480px;margin:0 auto;padding:16px 24px}
+.import-area{background:#fff;border-radius:10px;padding:18px 24px;margin-bottom:16px;box-shadow:0 1px 4px rgba(0,0,0,.08);display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+.import-btn{background:#e67e22;color:#fff;border:none;padding:10px 24px;border-radius:8px;font-size:14px;cursor:pointer;transition:background .2s}
+.import-btn:hover{background:#d35400}
+.file-name{font-size:13px;color:#666}
+.file-name .highlight{color:#e67e22;font-weight:600}
+.filter-bar{background:#fff;border-radius:10px;padding:14px 20px;margin-bottom:16px;box-shadow:0 1px 4px rgba(0,0,0,.08);display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.filter-item{display:flex;align-items:center;gap:6px}
+.filter-item label{font-size:12px;color:#555;font-weight:500;white-space:nowrap}
+.filter-item select,.filter-item input{padding:5px 10px;border:1px solid #d0d5dd;border-radius:6px;font-size:12px;background:#fff;min-width:100px}
+.filter-item input[type="date"]{min-width:130px}
+
+/* 周次筛选条 —— 仅作用于上方 5 个 KPI 卡 */
+.kpi-week-bar{display:flex;align-items:center;gap:12px;background:#fff7ef;border:1px solid #ffe2c4;border-radius:10px;padding:10px 18px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.05);flex-wrap:wrap}
+.kpi-week-bar .kpi-week-label{font-size:13px;font-weight:600;color:#c2410c;white-space:nowrap}
+.kpi-week-bar .kpi-week-hint{font-size:12px;color:#b08968}
+/* 周/月 维度切换按钮组 */
+.mode-toggle{display:inline-flex;background:#fff;border:1px solid #f0b27a;border-radius:8px;overflow:hidden;flex:0 0 auto}
+.mode-toggle .mode-btn{border:none;background:#fff;color:#7c2d12;font-size:13px;font-weight:600;padding:6px 18px;cursor:pointer;transition:all .15s;outline:none}
+.mode-toggle .mode-btn:hover{background:#fff4e9}
+.mode-toggle .mode-btn.active{background:#e67e22;color:#fff}
+/* 周次下拉式多选 */
+.week-select{position:relative}
+.week-select-trigger{padding:6px 14px;border:1px solid #f0b27a;border-radius:7px;font-size:13px;background:#fff;color:#7c2d12;cursor:pointer;min-width:160px;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:10px;user-select:none;transition:all .15s}
+.week-select-trigger:hover{border-color:#e67e22;background:#fff4e9}
+.week-select-trigger::after{content:"";width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:6px solid #c2410c;transition:transform .18s;flex:0 0 auto}
+.week-select.open .week-select-trigger::after{transform:rotate(180deg)}
+/* 周期数可达 38 周 / 265 天，面板必须限高滚动，否则会溢出到屏幕外 */
+.week-select-panel{position:absolute;top:calc(100% + 6px);left:0;z-index:50;background:#fff;border:1px solid #f0b27a;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.16);padding:6px;min-width:190px;display:none;max-height:min(320px,60vh);overflow-y:auto;overscroll-behavior:contain}
+.week-select.open .week-select-panel{display:block;animation:wsPop .14s ease-out}
+@keyframes wsPop{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+.week-option{display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:7px;cursor:pointer;font-size:13px;color:#7c2d12;font-weight:600}
+.week-option:hover{background:#fff4e9}
+.week-option input{accent-color:#e67e22;width:15px;height:15px;cursor:pointer;margin:0}
+.week-option.divider{border-top:1px solid #ffe2c4;margin-top:3px;padding-top:9px}
+/* 周期面板：输入筛选（面板滚动时搜索框吸顶，始终可见） */
+.week-search{position:sticky;top:0;z-index:2;background:#fff;padding:4px 4px 6px;border-bottom:1px solid #ffe2c4;margin-bottom:4px;border-radius:8px 8px 0 0}
+.week-search input{width:100%;padding:4px 8px;border:1px solid #f0b27a;border-radius:6px;font-size:12px;color:#7c2d12;background:#fffaf5;outline:none}
+.week-search input:focus{border-color:#e67e22;background:#fff}
+/* 长列表滚动条：细条 + 主题色，避免默认粗条压住选项文字 */
+.week-select-panel::-webkit-scrollbar,.combo-panel::-webkit-scrollbar{width:8px}
+.week-select-panel::-webkit-scrollbar-thumb,.combo-panel::-webkit-scrollbar-thumb{background:#f0b27a;border-radius:4px}
+.week-select-panel::-webkit-scrollbar-thumb:hover,.combo-panel::-webkit-scrollbar-thumb:hover{background:#e67e22}
+.week-select-panel::-webkit-scrollbar-track,.combo-panel::-webkit-scrollbar-track{background:#fffaf5;border-radius:4px}
+
+/* ===== 可搜索下拉（筛选栏 select 升级为「输入即筛选」组合框） ===== */
+.combo{position:relative;display:inline-block;min-width:160px;vertical-align:middle}
+.combo-input{width:100%;padding:5px 34px 5px 10px;border:1px solid #d0d5dd;border-radius:6px;font-size:12px;background:#fff;line-height:1.4;color:#333}
+.combo-input:focus{border-color:#e67e22;outline:none;box-shadow:0 0 0 2px rgba(230,126,34,.15)}
+.combo-input.has-val{border-color:#f0b27a;background:#fffaf3}
+.combo-input::placeholder{color:#c2410c;font-weight:600}
+.combo-clear{position:absolute;right:18px;top:50%;transform:translateY(-50%);cursor:pointer;color:#c2410c;font-size:14px;line-height:1;padding:1px 4px;border-radius:4px;z-index:2}
+.combo-clear:hover{background:#fdecea;color:#a32b1c}
+.combo-caret{position:absolute;right:8px;top:50%;transform:translateY(-50%);pointer-events:none;width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:6px solid #c2410c}
+.combo-panel{position:absolute;top:calc(100% + 4px);left:0;z-index:60;background:#fff;border:1px solid #f0b27a;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.16);max-height:300px;overflow:auto;display:none;min-width:100%}
+.combo.open .combo-panel{display:block;animation:wsPop .12s ease-out}
+.combo-opt{display:flex;align-items:center;padding:6px 10px;font-size:12px;color:#333;cursor:pointer;white-space:nowrap;max-width:360px;overflow:hidden}
+.combo-opt:hover,.combo-opt.active{background:#fff4e9;color:#7c2d12}
+.combo-opt.sel{font-weight:700;color:#c2410c;background:#fff7ef}
+.combo-opt .ck{display:inline-block;width:12px;height:12px;border:1px solid #f0b27a;border-radius:3px;margin-right:7px;background:#fff;position:relative;flex:0 0 auto}
+.combo-opt.sel .ck{background:#e67e22;border-color:#e67e22}
+.combo-opt.sel .ck::after{content:"";position:absolute;left:3px;top:0;width:4px;height:8px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(40deg)}
+.combo-opt .tx{overflow:hidden;text-overflow:ellipsis}
+.combo-actions{display:flex;gap:6px;padding:6px;border-bottom:1px solid #ffe2c4}
+.combo-actions .ca{border:1px solid #f0b27a;background:#fffaf5;color:#7c2d12;font-size:11px;font-weight:600;padding:3px 8px;border-radius:5px;cursor:pointer}
+.combo-actions .ca:hover{background:#e67e22;color:#fff;border-color:#e67e22}
+.combo-empty{padding:8px 10px;font-size:12px;color:#aaa}
+
+.kpi-grid{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:16px}
+.kpi-card{flex:1 1 200px;min-width:0;background:#fff;border-radius:10px;padding:16px 18px;box-shadow:0 1px 4px rgba(0,0,0,.08);position:relative;transition:all .25s;overflow:hidden}
+.kpi-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:#e67e22}
+.kpi-card:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.12)}
+.kpi-label{font-size:12px;color:#888;margin-bottom:6px;letter-spacing:.5px}
+.kpi-value{font-size:28px;font-weight:700;color:#e67e22;line-height:1.2}
+.kpi-value .unit{font-size:14px;font-weight:400;color:#999;margin-left:4px}
+.kpi-change{position:absolute;top:12px;right:12px;display:flex;flex-direction:column;align-items:center;gap:1px;font-size:10px;padding:3px 8px;border-radius:8px;font-weight:600;line-height:1.2}
+.kpi-change span:first-child{font-size:11px}
+.kpi-change span:last-child{font-size:9px;opacity:.9}
+.kpi-change.up{background:#fbe9e7;color:#c62828}
+.kpi-change.down{background:#e8f5e9;color:#2e7d32}
+.kpi-change.flat{background:#f5f5f5;color:#757575}
+.kpi-sub{font-size:11px;color:#aaa;margin-top:4px}
+
+.charts-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;align-items:start}
+.chart-card{background:#fff;border-radius:10px;padding:18px 24px;box-shadow:0 1px 4px rgba(0,0,0,.08);display:flex;flex-direction:column}
+.chart-card h3{font-size:14px;color:#444;margin-bottom:10px;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.hm-title{flex:1 1 auto}
+.hm-wow{font-size:12px;font-weight:600;padding:2px 10px;border-radius:12px;white-space:nowrap}
+.hm-wow.up{background:#fbe9e7;color:#c62828}
+.hm-wow.down{background:#e8f5e9;color:#2e7d32}
+.hm-wow.flat{background:#f5f5f5;color:#757575}
+.chart-card canvas{width:100%!important;height:360px!important;display:block}
+.chart-card-full{grid-column:1/-1}
+/* 四张趋势图（2×2）统一高度，保持网格整齐 */
+#chartOrderTrend,#chartDeliveryTrend,#chartWeightTrend,#chartVolumeTrend{height:360px!important;max-height:none!important}
+/* 收入/A毛利趋势图与上方四张趋势图同高 */
+#chartRevTrend,#chartGmTrend{height:360px!important;max-height:none!important}
+/* 客户单量趋势 / TOP5 占比趋势 / TOP10 客户单量（加高） */
+#chartCustomer,#chartCustomerShare,#chartCustomerTop{height:440px!important;max-height:none!important}
+/* 客户区：左=TOP5+其他趋势（宽），右=TOP10 客户单量 */
+.charts-row-cust{display:grid;grid-template-columns:1.65fr 1fr;gap:16px;margin-bottom:16px;align-items:start}
+@media(max-width:900px){.charts-row-cust{grid-template-columns:1fr}}
+/* 跨区组合图 固定高度 */
+#chartCrossLocal{height:380px!important;max-height:none!important}
+/* 新增：司机人效 / 收入分布 / 邮编维度 图表高度统一 */
+#chartDriverQty,#chartDriverAd,#chartRevCustomer,#chartRevPerCustomer{height:420px!important;max-height:none!important}
+#heatmapContainer,#custSegHeatContainer{width:100%;min-height:120px}
+@media(max-width:900px){.kpi-grid{grid-template-columns:repeat(3,1fr)}.charts-row{grid-template-columns:1fr}}
+@media(max-width:600px){.kpi-grid{grid-template-columns:repeat(2,1fr)}.header{flex-direction:column;align-items:flex-start;gap:8px}}
+
+/* ===== 热力图新样式（通用：发件×目的 / 货型 / ZONE 共用） ===== */
+.hm-nodata{text-align:center;color:#bbb;padding:40px 0;font-size:14px}
+.hm-subtitle{font-size:11px;color:#b08968;margin-bottom:8px;margin-top:-4px}
+.hm-legend{display:flex;align-items:center;gap:10px;margin:8px 2px 2px;font-size:10px;color:#8a6b57;font-weight:600}
+.hm-legend-bar{flex:1;max-width:220px;height:10px;border-radius:6px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.06);
+  background:linear-gradient(90deg,rgb(255,245,235) 0%,rgb(253,226,200) 20%,rgb(249,198,152) 40%,rgb(244,160,84) 60%,rgb(206,100,34) 80%,rgb(136,56,14) 100%)}
+.hm-wrap{overflow-x:auto;padding:4px 0 8px;width:100%}
+.hm-table{border-collapse:separate;border-spacing:3px;font-size:11px;table-layout:fixed;width:100%;min-width:100%}
+.hm-table col{min-width:78px}
+.hm-table th, .hm-table td{width:calc(100% / var(--cols,6))}
+.hm-table th{background:#fffaf3;padding:7px 4px;text-align:center;border:none;position:sticky;top:0;z-index:4;font-weight:600;color:#5b3a29;box-shadow:0 1px 0 #f0e6db}
+.hm-table th .sub, .hm-table td .sub{display:block;font-weight:700;font-size:9px;margin-top:1px;opacity:.95}
+.hm-table th .sub{color:#b08968}
+.hm-table td.row-head{background:#fff6ee;padding:7px 8px;text-align:left;font-weight:600;color:#5b3a29;white-space:nowrap;position:sticky;left:0;z-index:3;box-shadow:1px 0 0 #f0e6db;border-radius:6px 0 0 6px}
+.hm-table td.row-head .sub{color:#b08968;font-size:9px}
+.hm-table td.cell{padding:12px 6px;text-align:center;border-radius:6px;font-weight:800;font-size:12.5px;position:relative;transition:transform .12s ease,box-shadow .12s ease;min-height:52px;vertical-align:middle;line-height:1.25}
+.hm-table td.cell.empty{background:#f6f6f6;color:#cfcfcf;font-weight:600}
+.hm-table td.cell:hover{transform:scale(1.06);box-shadow:0 3px 10px rgba(0,0,0,.18);position:relative;z-index:5}
+.hm-table td.total{padding:12px 6px;text-align:center;border-radius:6px;font-weight:800;font-size:12.5px;box-shadow:inset 0 0 0 1px rgba(194,65,12,.28);vertical-align:middle;line-height:1.25;position:relative}
+.hm-table td.grand{padding:12px 6px;text-align:center;border-radius:6px;font-weight:800;font-size:13.5px;box-shadow:inset 0 0 0 2px rgba(194,65,12,.45);vertical-align:middle;line-height:1.25;position:relative}
+/* 始发大区×始发HUB×目的站点 可展开热力图 */
+.hm-table.rhd td.row-head.clickable{cursor:pointer;user-select:none;background:#ffe9d6}
+.hm-table.rhd td.row-head.clickable:hover{background:#ffd9bd}
+.hm-table.rhd tr.grp-row td.row-head{font-size:11.5px;box-shadow:inset 0 0 0 1px rgba(194,65,12,.18)}
+.hm-table.rhd tr.sub-row td.row-head.sub{background:#fff6ee;color:#9a6b4f;font-weight:500;padding-left:22px;font-size:11px}
+.hm-table.rhd tr.sub-row td.cell,.hm-table.rhd tr.sub-row td.total{opacity:.96}
+.cell-wow{position:absolute;top:2px;right:2px;font-size:8.5px;font-weight:800;padding:0 4px;border-radius:5px;line-height:1.45;white-space:nowrap;z-index:2;background:#fff}
+.cell-wow.up{background:#fff;color:#c62828;box-shadow:0 0 0 1px rgba(198,40,40,.35),0 1px 2px rgba(0,0,0,.18)}
+.cell-wow.down{background:#fff;color:#1b7a2d;box-shadow:0 0 0 1px rgba(27,122,45,.35),0 1px 2px rgba(0,0,0,.18)}
+.cell-wow.flat{background:#fff;color:#666;box-shadow:0 0 0 1px rgba(120,120,120,.3)}
+.cell-wowabs{position:absolute;bottom:2px;left:2px;font-size:7.5px;font-weight:700;padding:0 3px;border-radius:5px;line-height:1.4;white-space:nowrap;z-index:2}
+.cell-wowabs.up{background:#c62828;color:#fff}
+.cell-wowabs.down{background:#2e7d32;color:#fff}
+.cell-wowabs.flat{background:#9e9e9e;color:#fff}
+.cell-sharesub{position:absolute;bottom:2px;right:2px;font-size:7.5px;font-weight:800;padding:0 3px;border-radius:5px;line-height:1.4;white-space:nowrap;z-index:2}
+.cell-sharesub.up{background:#e3f2fd;color:#1565c0;box-shadow:0 0 0 1px rgba(21,101,192,.35)}
+.cell-sharesub.down{background:#fff3e0;color:#ef6c00;box-shadow:0 0 0 1px rgba(239,108,0,.35)}
+.cell-sharesub.flat{background:#f0f0f0;color:#757575;box-shadow:0 0 0 1px rgba(120,120,120,.3)}
+.auto-banner{background:#fff4e9;border:1px solid #f0b27a;color:#7c2d12;border-radius:10px;padding:12px 18px;margin-bottom:16px;font-size:13px;line-height:1.6}
+.auto-banner code{background:#fff;padding:1px 6px;border-radius:4px;border:1px solid #f0b27a;font-size:12px}
+/* 数据健康度提示条 */
+.health-bar{background:#f1f8f4;border:1px solid #cfe6d8;color:#2f5d43;border-radius:10px;padding:10px 18px;margin-bottom:14px;font-size:12.5px;line-height:1.6;display:flex;flex-wrap:wrap;gap:6px 18px;align-items:center}
+.health-bar .hb-title{font-weight:700;color:#2f5d43}
+.health-bar .hb-item{background:#fff;border:1px solid #d9ece1;border-radius:14px;padding:2px 10px;font-weight:600}
+.health-bar .hb-item.warn{background:#fff4e9;border-color:#f0b27a;color:#7c2d12}
+.health-bar .hb-item.bad{background:#fdecea;border-color:#f5c6c2;color:#a32b1c}
+/* 进行中周期提示 */
+.partial-tip{font-size:12px;font-weight:600;color:#a32b1c;background:#fdecea;border:1px solid #f5c6c2;border-radius:12px;padding:2px 10px;white-space:nowrap}
+/* ===== 周简报卡片（自动生成，格式同人工简报） ===== */
+.brief-card{background:#fff;border-radius:10px;padding:18px 24px;box-shadow:0 1px 4px rgba(0,0,0,.08);margin-bottom:16px}
+.brief-head{display:flex;align-items:baseline;gap:12px;margin-bottom:10px;border-bottom:2px solid #f0f2f5;padding-bottom:8px}
+.brief-title{font-size:16px;font-weight:700;color:#d35400}
+.brief-sub{font-size:12px;color:#888}
+.brief-body{font-size:13.5px;line-height:1.95;color:#333}
+.brief-line{white-space:pre-wrap}
+.brief-line:first-child{font-weight:600}
+/* ===== 分析会 TAB ===== */
+.tab-nav{display:flex;gap:8px;background:#fff;border-radius:10px;padding:8px 14px;margin-bottom:16px;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+.tab-nav .tab-btn{border:none;background:transparent;color:#7c2d12;font-size:14px;font-weight:600;padding:8px 22px;border-radius:8px;cursor:pointer;transition:all .15s}
+.tab-nav .tab-btn:hover{background:#fff4e9}
+.tab-nav .tab-btn.active{background:#e67e22;color:#fff}
+.tab-panel{display:block}
+.section-title{font-size:16px;font-weight:700;color:#d35400;margin:18px 0 10px;padding-left:12px;border-left:4px solid #e67e22}
+</style>
+</head>
+<body>
+<div class="header">
+<div><h1>日常数据监控看板</h1><div class="subtitle">物流运营核心指标 · 支持周度/月度/日度切换</div></div>
+<div class="header-right"><span class="data-info" id="dataInfo">未加载数据</span><button class="import-btn" id="shotBtn" style="margin-left:12px">生成长截图</button></div>
+</div>
+<div class="container">
+<div class="import-area">
+<input type="file" id="fileInput" accept=".xlsx,.xls,.csv" style="display:none">
+<button class="import-btn" id="importBtn">导入 Excel 数据</button>
+<span class="file-name" id="fileName">当前文件：<span class="highlight">未导入</span></span>
+
+</div>
+<div id="autoBanner" class="auto-banner" style="display:none"></div>
+<div id="healthBar" class="health-bar" style="display:none"></div>
+<div class="filter-bar" id="filterBar">
+<div class="filter-item"><label>开始日期</label><input type="date" id="filterDateStart" lang="zh-CN"></div>
+<div class="filter-item"><label>结束日期</label><input type="date" id="filterDateEnd" lang="zh-CN"></div>
+<div class="filter-item"><label>发件大区</label><select id="filterOriginRegion"><option value="">全部</option></select></div>
+<div class="filter-item"><label>目的大区</label><select id="filterDestRegion"><option value="">全部</option></select></div>
+<div class="filter-item"><label>目的站点</label><select id="filterDestStation"><option value="">全部</option></select></div>
+<div class="filter-item"><label>关联大区</label><select id="filterRelatedRegion"><option value="">全部</option></select></div>
+<div class="filter-item"><label>始发HUB</label><select id="filterOriginHub"><option value="">全部</option></select></div>
+<div class="filter-item"><label>目的HUB</label><select id="filterDestHub"><option value="">全部</option></select></div>
+<div class="filter-item"><label>客户简称</label><select id="filterCustomer"><option value="">全部</option></select></div>
+<div class="filter-item"><label>是否跨区注入</label><select id="filterCrossRegion"><option value="">全部</option><option value="是">是</option><option value="否">否</option></select></div>
+<div class="filter-item"><label>重量段</label><select id="filterWeight"><option value="">全部</option></select></div>
+<div class="filter-item"><label>超尺寸</label><select id="filterOversize"><option value="">全部</option></select></div>
+</div>
+
+<!-- 周期筛选：作用于 5 个 KPI 卡 + 热力图（不含开始/结束日期）；可切换周度/月度 -->
+<div class="kpi-week-bar">
+  <div class="mode-toggle" id="modeToggle">
+    <button class="mode-btn active" data-mode="week" type="button">周度</button>
+    <button class="mode-btn" data-mode="month" type="button">月度</button>
+    <button class="mode-btn" data-mode="day" type="button">日度</button>
+  </div>
+  <span class="kpi-week-label" id="periodLabel">周次（可多选）</span>
+  <div class="week-select" id="weekSelect">
+    <div class="week-select-trigger" id="weekTrigger"><span id="weekTriggerText">全部（累计）</span></div>
+    <div class="week-select-panel" id="weekPanel"></div>
+  </div>
+  <span class="partial-tip" id="partialTip" style="display:none"></span>
+  <span class="kpi-week-hint">作用于 指标卡 / 两张热力图 / 客户单量TOP10；单周期显示环比，多选或全部仅显示绝对值</span>
+</div>
+
+<div class="tab-nav">
+  <button class="tab-btn active" data-tab="monitor" type="button">运营监控</button>
+  <button class="tab-btn" data-tab="meeting" type="button">运营分析</button>
+  <button class="tab-btn" data-tab="business" type="button">经营分析</button>
+</div>
+<div id="panel-monitor" class="tab-panel">
+<div class="kpi-grid">
+<div class="kpi-card"><div class="kpi-label">日均单量</div><div class="kpi-value" id="kpiOrder">--<span class="unit">单/天</span></div><div class="kpi-change" id="kpiOrderChange">--</div><div class="kpi-sub">运单去重数 / 天数去重</div></div>
+<div class="kpi-card"><div class="kpi-label">平均重量</div><div class="kpi-value" id="kpiWeight">--<span class="unit">lb</span></div><div class="kpi-change" id="kpiWeightChange">--</div><div class="kpi-sub">总重量 / 有重量值的订单数</div></div>
+<div class="kpi-card"><div class="kpi-label">平均体积</div><div class="kpi-value" id="kpiVolume">--<span class="unit">m³</span></div><div class="kpi-change" id="kpiVolumeChange">--</div><div class="kpi-sub">总体积 / 有体积值的订单数</div></div>
+<div class="kpi-card"><div class="kpi-label">平均ZONE</div><div class="kpi-value" id="kpiZone">--<span class="unit"></span></div><div class="kpi-change" id="kpiZoneChange">--</div><div class="kpi-sub">ZONE合计 / 有ZONE值的订单数</div></div>
+<div class="kpi-card"><div class="kpi-label">A-D时长</div><div class="kpi-value" id="kpiDelivery">--<span class="unit">h</span></div><div class="kpi-change" id="kpiDeliveryChange">--</div><div class="kpi-sub" id="kpiDeliverySub">95分位达成值（P95）</div></div>
+<div class="kpi-card"><div class="kpi-label">跨区注入单量</div><div class="kpi-value" id="kpiCross">--<span class="unit">单/天</span></div><div class="kpi-change" id="kpiCrossChange">--</div><div class="kpi-sub">跨区运单去重数 / 跨区出现天数</div></div>
+<div class="kpi-card"><div class="kpi-label">本区揽派</div><div class="kpi-value" id="kpiLocal">--<span class="unit">单/天</span></div><div class="kpi-change" id="kpiLocalChange">--</div><div class="kpi-sub">本区运单去重数 / 本区出现天数</div></div>
+<div class="kpi-card"><div class="kpi-label">跨区比例</div><div class="kpi-value" id="kpiCrossRatio">--<span class="unit">%</span></div><div class="kpi-change" id="kpiCrossRatioChange">--</div><div class="kpi-sub">跨区去重订单数 ÷ (跨区+本区去重订单数)</div></div>
+<div class="kpi-card"><div class="kpi-label">单票收入</div><div class="kpi-value" id="kpiRevPer">--<span class="unit">$/票</span></div><div class="kpi-change" id="kpiRevPerChange">--</div><div class="kpi-sub">收入金额(管报) / 有收入值订单数</div></div>
+<div class="kpi-card"><div class="kpi-label">单票派送成本</div><div class="kpi-value" id="kpiCostPer">--<span class="unit">$/票</span></div><div class="kpi-change" id="kpiCostPerChange">--</div><div class="kpi-sub">派送成本(记账成本·未税) / 有成本订单数</div></div>
+<div class="kpi-card"><div class="kpi-label">单票A毛利</div><div class="kpi-value" id="kpiProfit">--<span class="unit">$/票</span></div><div class="kpi-change" id="kpiProfitChange">--</div><div class="kpi-sub" id="kpiProfitSub">平均收入 − 平均派送成本（按收入与成本均有的订单）</div></div>
+</div>
+<div class="brief-card" id="briefCard">
+  <div class="brief-head"><span class="brief-title">周简报</span><span class="brief-sub" id="briefPeriod"></span></div>
+  <div class="brief-body" id="briefBody"></div>
+</div>
+<div class="charts-row">
+<div class="chart-card"><h3>各周期日均单量趋势</h3><canvas id="chartOrderTrend"></canvas></div>
+<div class="chart-card"><h3>各周期 A-D时长趋势（P95 · 总计 / 跨区注入 / 本区揽派）</h3><canvas id="chartDeliveryTrend"></canvas></div>
+<div class="chart-card"><h3>各周期平均重量趋势</h3><canvas id="chartWeightTrend"></canvas></div>
+<div class="chart-card"><h3>各周期平均体积趋势</h3><canvas id="chartVolumeTrend"></canvas></div>
+</div>
+<div class="charts-row">
+<div class="chart-card chart-card-full"><h3><span class="hm-title">各周期 超尺寸结构占比趋势（OS / AHS-W / AHS-H / 普货）</span></h3><div class="hm-subtitle">分类依据：长/宽/高/重量(kg) —— OS（长≥243且&lt;274 或 周长≥330且&lt;419）＞ AHS-W（重量≥22.6796kg）＞ AHS-H（长121~243 或 周长266~330 且宽≤76）＞ 普货；按当周期票数口径占比(%)。</div><canvas id="chartOversizeTrend"></canvas></div>
+</div>
+<div class="charts-row">
+<div class="chart-card"><h3>各周期 单票收入 · 单票派送成本 · 单票A毛利（$）</h3><canvas id="chartRevTrend"></canvas></div>
+<div class="chart-card"><h3>各周期 A毛利率（%）</h3><canvas id="chartGmTrend"></canvas></div>
+</div>
+<div class="charts-row">
+<div class="chart-card"><h3>各周期 发件大区 票均收入（$）</h3><canvas id="chartRevByOrigin"></canvas></div>
+<div class="chart-card"><h3>各周期 目的大区 票均收入（$）</h3><canvas id="chartRevByDest"></canvas></div>
+</div>
+
+<div class="charts-row">
+<div class="chart-card chart-card-full"><h3><span class="hm-title">发件大区 × 目的大区 热力图</span><span id="hmWow" class="hm-wow"></span></h3><div class="hm-subtitle">日均单量 = 运单去重数 ÷ 天数去重（空大区不参与）</div><div id="heatmapContainer"></div></div>
+</div>
+<div class="charts-row">
+<div class="chart-card chart-card-full"><h3><span class="hm-title">始发HUB × 目的HUB 热力图</span><span id="hubWow" class="hm-wow"></span></h3><div class="hm-subtitle">日均单量 = 运单去重数 ÷ 天数去重（空 HUB 不参与）</div><div class="hm-subtitle" id="hubCoverNote" style="display:none"></div><div id="hubHeatmapContainer"></div></div>
+</div>
+<div class="charts-row charts-row-cust">
+<div class="chart-card"><h3><span class="hm-title">客户日均单量趋势 · TOP5 + 其他客户</span><span id="custWow" class="hm-wow"></span></h3><div class="hm-subtitle">Y = 日均单量(单/天) = 当周期该客户票数(按行计数) ÷ 当周期天数去重（分母统一用该周期天数，故 6 条线可加总 = 总体日均单量）；TOP5 按全周期单量排序，其余客户归并为「其他客户」；客户名为空并入「其他客户」。</div><canvas id="chartCustomer"></canvas></div>
+<div class="chart-card"><h3><span class="hm-title">客户单量 TOP10</span><span id="custTopScope" class="hm-wow flat"></span></h3><div class="hm-subtitle">单周期勾选时 = 该周期客户单量（周期总量口径，非日均）；未勾选 / 多选时 = 全周期累计（与上方趋势图及其他图表一致）。</div><canvas id="chartCustomerTop"></canvas></div>
+</div>
+<div class="charts-row">
+<div class="chart-card chart-card-full"><h3><span class="hm-title">TOP5 客户单量占全量订单比例（%）</span><span id="custShareWow" class="hm-wow"></span></h3><div class="hm-subtitle">占比 = 该客户当周期运单去重数 ÷ 当周期全量运单去重数；「TOP5合计」= 5 家客户合计占全量订单比重，反映客户集中度。</div><canvas id="chartCustomerShare"></canvas></div>
+</div>
+<div class="charts-row">
+<div class="chart-card chart-card-full"><h3><span class="hm-title">货型 / 重量段 结构占比热力图</span><span id="segWow" class="hm-wow"></span></h3><div class="hm-subtitle">行=重量段，列=周次/月份/日期；每格主数字=日均单量(单/天)，下排=占当周/当月比重；右上角=占比周(月)环比，左下角=绝对值周(月)环比(Δ单/天)；颜色越深=占比越高。</div><div id="segHeatContainer"></div></div>
+</div>
+<div class="charts-row">
+<div class="chart-card chart-card-full"><h3><span class="hm-title">ZONE 分布占比热力图</span><span id="zoneWow" class="hm-wow"></span></h3><div class="hm-subtitle">行=GF_ZONE_FEDEX，列=周次/月份/日期；口径同上（绝对值=日均单量，占比=占当周/当月比重）。</div><div id="zoneHeatContainer"></div></div>
+</div>
+<div class="charts-row">
+<div class="chart-card chart-card-full"><h3>跨区注入 vs 本区揽派 · 周期日均单量与跨区率</h3><canvas id="chartCrossLocal"></canvas></div>
+</div>
+
+<!-- 司机人效（对应 Tableau「司机人效数据 / 司机人效情况」：按快递员领件站点聚合，HTML 原有数据缺此视角） -->
+<div class="charts-row">
+<div class="chart-card"><h3>司机人效 · 各领件站点日均单量 TOP15</h3><canvas id="chartDriverQty"></canvas></div>
+<div class="chart-card"><h3>司机人效 · 始发HUB × 目的站点 A-D 时长均值（最慢 TOP15）</h3><div class="hm-subtitle" id="driverAdNote"></div><canvas id="chartDriverAd"></canvas></div>
+</div>
+<!-- 收入分布（对应 Tableau「收入分布情况」：按客户聚合收入金额，仅含收入数据源时显示） -->
+<div class="charts-row">
+<div class="chart-card"><h3>客户收入金额 TOP10（$）</h3><div class="hm-subtitle">按收入金额排序；右侧图的客户与顺序完全对应，便于对照「量驱动 / 价驱动」。</div><canvas id="chartRevCustomer"></canvas></div>
+<div class="chart-card"><h3>上述 TOP10 客户 票均收入（$/票）</h3><div class="hm-subtitle">票均收入 = 该客户收入金额合计 ÷ 该客户票数(按行计数)（全周期累计口径，与上方一致）。</div><canvas id="chartRevPerCustomer"></canvas></div>
+</div>
+
+</div>
+<div id="panel-meeting" class="tab-panel" style="display:none">
+<div class="kpi-grid">
+<div class="kpi-card"><div class="kpi-label">日均单量</div><div class="kpi-value" id="mtOrder">--<span class="unit">单/天</span></div><div class="kpi-change" id="mtOrderChange">--</div><div class="kpi-sub">运单去重数 / 天数去重</div></div>
+<div class="kpi-card"><div class="kpi-label">平均重量</div><div class="kpi-value" id="mtWeight">--<span class="unit">lb</span></div><div class="kpi-change" id="mtWeightChange">--</div><div class="kpi-sub">总重量 / 有重量值的订单数</div></div>
+<div class="kpi-card"><div class="kpi-label">平均体积</div><div class="kpi-value" id="mtVolume">--<span class="unit">m³</span></div><div class="kpi-change" id="mtVolumeChange">--</div><div class="kpi-sub">总体积 / 有体积值的订单数</div></div>
+<div class="kpi-card"><div class="kpi-label">平均ZONE</div><div class="kpi-value" id="mtZone">--<span class="unit"></span></div><div class="kpi-change" id="mtZoneChange">--</div><div class="kpi-sub">ZONE合计 / 有ZONE值的订单数</div></div>
+<div class="kpi-card"><div class="kpi-label">A-D时长</div><div class="kpi-value" id="mtDelivery">--<span class="unit">h</span></div><div class="kpi-change" id="mtDeliveryChange">--</div><div class="kpi-sub" id="mtDeliverySub">95分位达成值（P95）</div></div>
+<div class="kpi-card"><div class="kpi-label">跨区注入单量</div><div class="kpi-value" id="mtCross">--<span class="unit">单/天</span></div><div class="kpi-change" id="mtCrossChange">--</div><div class="kpi-sub">跨区运单去重数 / 跨区出现天数</div></div>
+<div class="kpi-card"><div class="kpi-label">本区揽派</div><div class="kpi-value" id="mtLocal">--<span class="unit">单/天</span></div><div class="kpi-change" id="mtLocalChange">--</div><div class="kpi-sub">本区运单去重数 / 本区出现天数</div></div>
+<div class="kpi-card"><div class="kpi-label">跨区比例</div><div class="kpi-value" id="mtCrossRatio">--<span class="unit">%</span></div><div class="kpi-change" id="mtCrossRatioChange">--</div><div class="kpi-sub">跨区去重订单数 ÷ (跨区+本区去重订单数)</div></div>
+</div>
+  <div class="section-title">一、单量趋势（发件大区 / 客户前10 / 重量段 / 货型）</div>
+  <div class="charts-row">
+    <div class="chart-card chart-card-full"><h3><span class="hm-title">发件大区 × 周期 日均单量热力图</span><span id="hmRegionWow" class="hm-wow"></span></h3><div class="hm-subtitle">行=发件大区，列=周期；日均单量=运单去重数÷天数去重；每格下排=占当周期单量比重；单元格右上红/绿角标=日均单量绝对值环比，右下蓝/橙小角标=该格占当周总量比重的环比(单位：百分点)。</div><div id="hmRegion"></div></div>
+  </div>
+  <div class="charts-row">
+    <div class="chart-card chart-card-full"><h3><span class="hm-title">客户前10 × 周期 日均单量热力图</span><span id="hmCustWow" class="hm-wow"></span></h3><div class="hm-subtitle">行=客户前10（按全周期单量降序），列=周期；日均单量=运单去重数÷天数去重；单元格右上红/绿角标=日均单量绝对值环比，右下蓝/橙小角标=该格占当周总量比重的环比(单位：百分点)。</div><div id="hmCust"></div></div>
+  </div>
+  <div class="charts-row">
+    <div class="chart-card chart-card-full"><h3><span class="hm-title">重量段TOP8 × 周期 日均单量热力图</span><span id="hmWsegWow" class="hm-wow"></span></h3><div class="hm-subtitle">行=重量段TOP8，列=周期；日均单量=运单去重数÷天数去重；单元格右上红/绿角标=日均单量绝对值环比，右下蓝/橙小角标=该格占当周总量比重的环比(单位：百分点)。</div><div id="hmWseg"></div></div>
+  </div>
+  <div class="charts-row">
+    <div class="chart-card chart-card-full"><h3><span class="hm-title">货型 × 周期 结构占比热力图</span><span id="hmCargoWow" class="hm-wow"></span></h3><div class="hm-subtitle">行=货型(OS/AHS-W/AHS-H/普货)，列=周期；每格=该货型运单÷当周期总运单（结构占比%），颜色越深占比越高；每格右上角=该货型占比的环比。</div><div id="hmCargo"></div></div>
+  </div>
+  <div class="section-title">二、重量体积（按发件大区）</div>
+  <div class="charts-row">
+    <div class="chart-card chart-card-full"><h3><span class="hm-title">发件大区 × 周期 平均重量热力图</span><span id="hmWeightWow" class="hm-wow"></span></h3><div class="hm-subtitle">行=发件大区，列=周期；单元格=该大区该周期平均重量(lb)，颜色越深越大。</div><div id="hmWeight"></div></div>
+  </div>
+  <div class="charts-row">
+    <div class="chart-card chart-card-full"><h3><span class="hm-title">发件大区 × 周期 平均体积热力图</span><span id="hmVolWow" class="hm-wow"></span></h3><div class="hm-subtitle">行=发件大区，列=周期；单元格=该大区该周期平均体积(m³)，颜色越深越大。</div><div id="hmVol"></div></div>
+  </div>
+  <div class="section-title">三、流向（按发件大区）</div>
+  <div class="charts-row">
+    <div class="chart-card chart-card-full"><h3><span class="hm-title">发件大区 × 周期 平均ZONE热力图</span><span id="hmZoneWow" class="hm-wow"></span></h3><div class="hm-subtitle">行=发件大区，列=周期；单元格=该大区该周期平均ZONE，颜色越深越大。</div><div id="hmZone"></div></div>
+  </div>
+  <div class="charts-row">
+    <div class="chart-card chart-card-full"><h3><span class="hm-title">发件大区 × 周期 跨区比例热力图</span><span id="hmCrossWow" class="hm-wow"></span></h3><div class="hm-subtitle">行=发件大区，列=周期；单元格=该大区该周期跨区比例(%)，颜色越深越大。</div><div id="hmCross"></div></div>
+  </div>
+  <div class="section-title">四、A-D 时效（ZONE × 目的大区 × 目的站点 × 始发HUB，P95 达成值，横轴=时间周期）</div>
+  <div class="charts-row">
+    <div class="chart-card chart-card-full">
+      <h3>ZONE × 目的大区 × 目的站点 × 始发HUB · A-D 时效（P95，逐级展开，横轴=周期）</h3>
+      <div class="hm-subtitle">维度：行=ZONE（点击逐级展开 <b>目的大区 → 目的站点 → 始发HUB</b>）<b>×</b> 横轴时间周期；单元格 = 该「ZONE / 目的大区 / 目的站点 / 始发HUB × 周期」组合的 A-D 时长 <b>P95（95分位达成值，h）</b>，颜色越深越慢。各层级仅显示单量 TOP（目的大区 TOP <span id="adp95TopN"></span>、目的站点 TOP <span id="adp95TopDest"></span>、始发HUB TOP <span id="adp95TopHub"></span>），父级行聚合其下全部数据。仅统计有效样本 ≥ <span id="adp95MinN"></span> 单的组合；始发HUB 同时受全局筛选框影响。</div>
+      <div id="hmAdp95Period"></div>
+    </div>
+  </div>
+  <!-- 收入/成本相关图表（单票收入、单票派送成本、单票A毛利、A毛利率、成本占比收入、客户单均收入/收入占比、客户×重量段票均收入）已移至【经营分析】tab -->
+</div>
+<div id="panel-business" class="tab-panel" style="display:none">
+<div class="kpi-grid">
+<div class="kpi-card"><div class="kpi-label">单票收入</div><div class="kpi-value" id="bizRevPer">--<span class="unit">$/票</span></div><div class="kpi-change" id="bizRevPerChange">--</div><div class="kpi-sub">收入金额(管报) / 有收入值订单数</div></div>
+<div class="kpi-card"><div class="kpi-label">单票派送成本</div><div class="kpi-value" id="bizCostPer">--<span class="unit">$/票</span></div><div class="kpi-change" id="bizCostPerChange">--</div><div class="kpi-sub">派送成本(记账成本·未税) / 有成本订单数</div></div>
+<div class="kpi-card"><div class="kpi-label">单票A毛利</div><div class="kpi-value" id="bizProfit">--<span class="unit">$/票</span></div><div class="kpi-change" id="bizProfitChange">--</div><div class="kpi-sub" id="bizProfitSub">平均收入 − 平均派送成本（按收入与成本均有的订单）</div></div>
+</div>
+  <div class="section-title">一、经营数据（按目的大区）</div>
+  <div class="charts-row">
+    <div class="chart-card chart-card-full"><h3><span class="hm-title">目的大区 × 周期 单票收入（可逐级展开 目的HUB → 目的站点）</span></h3><div class="hm-subtitle">行=目的大区（点击逐级展开 <b>目的HUB → 目的站点</b>）<b>×</b> 横轴周期；单元格=该组合各周期 <b>单票收入($)=收入÷去重运单</b>，颜色越深越大。各层级仅显示单量 TOP（目的HUB TOP <span id="hmRevTopHub"></span>、目的站点 TOP <span id="hmRevTopSt"></span>），父级行聚合其下全部数据。仅统计有效样本 ≥ <span id="hmRevMinN"></span> 单（收入匹配=有收入值）的组合。</div><div id="hmRev"></div></div>
+  </div>
+  <div class="charts-row">
+    <div class="chart-card chart-card-full"><h3><span class="hm-title">目的大区 × 周期 单票派送成本（可逐级展开 目的HUB → 目的站点）</span></h3><div class="hm-subtitle">行=目的大区（点击逐级展开 <b>目的HUB → 目的站点</b>）<b>×</b> 横轴周期；单元格=该组合各周期 <b>单票派送成本($)=派送成本÷去重运单</b>，颜色越深越大。各层级仅显示单量 TOP（目的HUB TOP <span id="hmCostTopHub"></span>、目的站点 TOP <span id="hmCostTopSt"></span>），父级行聚合其下全部数据。仅统计有效样本 ≥ <span id="hmCostMinN"></span> 单（有成本值）的组合。</div><div id="hmCost"></div></div>
+  </div>
+  <div class="charts-row">
+    <div class="chart-card chart-card-full"><h3><span class="hm-title">目的大区 × 周期 单票A毛利（可逐级展开 目的HUB → 目的站点）</span></h3><div class="hm-subtitle">行=目的大区（点击逐级展开 <b>目的HUB → 目的站点</b>）<b>×</b> 横轴周期；单元格=该组合各周期 <b>单票A毛利($)=(收入−派送成本)÷去重运单</b>（按收入与成本都有的同一订单集合），颜色越深越大。各层级仅显示单量 TOP（目的HUB TOP <span id="hmPgTopHub"></span>、目的站点 TOP <span id="hmPgTopSt"></span>），父级行聚合其下全部数据。仅统计有效样本 ≥ <span id="hmPgMinN"></span> 单的组合。</div><div id="hmPg"></div></div>
+  </div>
+  <div class="charts-row">
+    <div class="chart-card chart-card-full"><h3><span class="hm-title">目的大区 × 周期 A毛利率趋势</span><span id="hmGmRateWow" class="hm-wow"></span></h3><div class="hm-subtitle">X=周期，每条折线=一个目的大区；Y=A毛利率(%)（(收入−派送成本)/收入）。</div><canvas id="chartGmRate"></canvas></div>
+    <div class="chart-card chart-card-full"><h3><span class="hm-title">目的大区 × 周期 成本占比收入趋势</span><span id="hmCostRatioWow" class="hm-wow"></span></h3><div class="hm-subtitle">X=周期，每条折线=一个目的大区；Y=成本占比收入(%)（派送成本/收入×100，越低越好）。</div><canvas id="chartCostRatio"></canvas></div>
+  </div>
+  <div class="section-title">二、客户单均收入分析（前10）</div>
+  <div class="charts-row">
+    <div class="chart-card chart-card-full"><h3><span class="hm-title">客户前10 × 周期 单均收入热力图</span><span id="hmCustRevWow" class="hm-wow"></span></h3><div class="hm-subtitle">行=客户前10，列=周期；单元格=该客户该周期单均收入($)，颜色越深越大。</div><div id="hmCustRev"></div></div>
+  </div>
+  <div class="charts-row">
+    <div class="chart-card chart-card-full"><h3><span class="hm-title">客户前10 × 周期 收入占比热力图</span><span id="hmCustShareWow" class="hm-wow"></span></h3><div class="hm-subtitle">行=客户前10，列=周期；单元格=该客户该周期收入占比(%)，颜色越深越大。</div><div id="hmCustShare"></div></div>
+  </div>
+  <div class="charts-row">
+    <div class="chart-card chart-card-full"><h3><span class="hm-title">发单量前十客户 × 重量段 票均收入热力图</span><span id="custSegWow" class="hm-wow"></span></h3><div class="hm-subtitle">行=发单量前十客户（按全周期运单去重数降序），列=重量段；单元格主数字=该客户该重量段票均收入($)=收入÷票数(去重运单)，颜色越深日均单量(单/天)越高；下排=该重量段货量占该客户总发货量比重(%)（即该重量段在此客户发货量中的占比）；行/列/总计主数字=对应维度票均收入，副标签=日均单量(单/天)。</div><div id="custSegHeatContainer"></div></div>
+  </div>
+  <div class="section-title">三、流向价格（始发大区 × 周期 票均价格，可逐级展开 HUB）</div>
+  <div class="charts-row">
+    <div class="chart-card chart-card-full">
+      <h3>始发大区 × 周期 票均价格（可逐级展开 始发HUB → 目的HUB → 目的站点）</h3>
+      <div class="hm-subtitle">维度：行=始发大区（点击逐级展开 <b>始发HUB → 目的HUB → 目的站点</b>）<b>×</b> 横轴时间周期；单元格 = 该层级组合在各周期的 <b>票均价格（收入÷去重运单，$/票）</b>，颜色越深越高。各层级仅显示单量 TOP（始发HUB/目的HUB TOP <span id="rhdRevPeriodTopN"></span>、目的站点 TOP <span id="rhdRevPeriodTopDest"></span>），父级行聚合其下全部数据。仅统计有效样本 ≥ <span id="rhdRevPeriodMinN"></span> 单的组合；始发HUB/目的HUB 同时受全局筛选框影响。</div>
+      <div id="hmRhdRevPeriod"></div>
+    </div>
+  </div>
+</div>
+</div>
+<script>
+const REGION_ORDER=["WE","NE","MS","GL"];
+function regionSort(a,b){const ia=REGION_ORDER.indexOf(a),ib=REGION_ORDER.indexOf(b);if(ia>=0&&ib>=0)return ia-ib;if(ia>=0)return-1;if(ib>=0)return 1;return a.localeCompare(b)}
+let rawData=[],filteredData=[],chartInstances={},selectedWeeks=new Set(),selectedMonths=new Set(),selectedDays=new Set(),viewMode='week';
+let ALL_PERIODS=[];   // 当前维度下的全量周期列表缓存（避免每次勾选周期都全量扫描 170 万行）
+/* 数据源是否含收入列（日常监控数据源_2026_含收入.csv）；PARTIAL=进行中周期集合；PERIOD_COV=各周期收入覆盖率 */
+let hasRevenue=false,PARTIAL=new Set(),PERIOD_COV={};
+/* 收入/成本列名（由 merge_revenue.py 关联产出） */
+const COL_REV='收入金额(管报)',COL_COST='记账成本(未税)',COL_REVHIT='收入匹配';
+/* 周/月/日 三维度切换：periodOf 返回当前维度下的周期标识
+   （周='Wxx' 按 ISO 周序排序；月='YYYY-MM'、日='YYYY-MM-DD' 直接按字符串排序即时间序） */
+function periodOf(r){return viewMode==='week'?(r._week||''):(viewMode==='day'?(r._dateStr||''):(r._month||''))}
+function getPeriods(d){const s=new Set();d.forEach(r=>{const p=periodOf(r);if(p)s.add(p)});const arr=[...s];if(viewMode==='week')arr.sort((a,b)=>{const ya=weekYear(a)||0,yb=weekYear(b)||0;return ya!==yb?ya-yb:(parseInt(a.slice(1))-parseInt(b.slice(1)));});else arr.sort();return arr}
+function selectedPeriodSet(){return viewMode==='week'?selectedWeeks:(viewMode==='day'?selectedDays:selectedMonths)}
+function periodSort(a,b){return viewMode==='week'?(((weekYear(a)||0)!==(weekYear(b)||0)?(weekYear(a)||0)-(weekYear(b)||0):(parseInt(a.slice(1))-parseInt(b.slice(1))))):(a<b?-1:(a>b?1:0))}
+/* ===== 周期显示标签：周 / 月 / 日 一律带上年度 =====
+   内部周期 key 保持不变（W33 / 2026-03 / 2026-09-22），仅在「展示层」统一换算，
+   因此 selectedWeeks 选择集、ALL_PERIODS 排序、跨度环比等逻辑无需改动。
+   周次 →「26W33」（两位年度 + ISO 周序）；月 / 日本身已含年度，原样返回。 */
+const WEEK_MIN={},WEEK_YEAR={};   // 周 → 该周最早日期 / 周 → 两位年度（derive 阶段逐行登记，不额外全量扫描）
+function weekYear(w){
+  if(WEEK_YEAR[w])return WEEK_YEAR[w];
+  const dm=WEEK_MIN[w];if(!dm)return '';
+  // ISO 年归属：以该周「周四」所在公历年为准，跨年周边界不会串年（如 2025-12-29 属 26W1）
+  const p=dm.split('-'),t=new Date(Date.UTC(+p[0],+p[1]-1,+p[2]));
+  const dow=(t.getUTCDay()+6)%7;                       // 周一记为 0
+  const thu=new Date(t.getTime()+(3-dow)*86400000);
+  const y=String(thu.getUTCFullYear()%100).padStart(2,'0');
+  WEEK_YEAR[w]=y;return y;
+}
+function pLabel(p){if(!p||viewMode!=='week')return p;const y=weekYear(p);return y?(y+p):p}
+function setWeekDateRange(){
+  // 默认清空日期区间（全周期）
+  document.getElementById('filterDateStart').value='';
+  document.getElementById('filterDateEnd').value='';
+}
+function fmtD(v){if(v==null||v==='')return'';let d;
+  if(typeof v==='number'){// Excel 串行日期：从1899-12-30开始的天数，用UTC避免时区偏移
+    d=new Date(Date.UTC(1899,11,30)+Math.round(v)*86400000);
+  }else{
+    const s=String(v).trim();
+    // 兼容 'YYYY-MM-DD'、'YYYY/M/D'、'YYYY/MM/DD'，统一按日历日转UTC，避免本地时区偏移
+    const m=s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})(?:[ T].*)?$/);
+    if(m){d=new Date(Date.UTC(+m[1], +m[2]-1, +m[3]));}
+    else{d=new Date(s);} // 兜底
+  }
+  if(isNaN(d.getTime()))return String(v);
+  return d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+String(d.getUTCDate()).padStart(2,'0')}
+/* ISO 周次（周一为一周起点，周日截止），与 Python isocalendar 口径一致。
+   仅当数据缺「周次」列时（如手动导入原始月度文件）兜底按日期计算。 */
+function isoWeekOf(dateStr){
+  if(!dateStr)return '';
+  const s=String(dateStr).trim().split(' ')[0];
+  let p=s.split('-');
+  if(p.length<3)p=s.split('/');
+  if(p.length<3)return '';
+  const d=new Date(+p[0], +p[1]-1, +p[2]); // 本地时间解释，避免 UTC 偏移
+  const day=d.getDay();                    // 0=Sun..6=Sat
+  const dayNr=(day+6)%7;                   // Mon=0..Sun=6
+  const thu=new Date(d.getFullYear(),d.getMonth(),d.getDate()-dayNr+3); // 本周四
+  const ft=new Date(thu.getFullYear(),0,4); // 当年首个周四所在周=ISO第1周
+  const fDayNr=(ft.getDay()+6)%7;
+  ft.setDate(ft.getDate()-fDayNr+3);
+  const wk=1+Math.round((thu-ft)/(7*24*3600*1000));
+  return 'W'+wk;
+}
+const HUB_REGION={'IAH':'TX'}; // 实际始发/目的 Hub 中心代码 → 大区修正；IAH(.G)=休斯顿→TX
+const DROP_DEST_REGIONS=new Set(['Ground']); // 目的大区脏值（服务类型「Ground」混入大区字段），解析时整行剔除
+function hubRegionOf(v){if(!v)return'';const k=String(v).trim();return HUB_REGION[k]||HUB_REGION[''+k.split('.')[0]]||'';}
+/* Hub 中心别名归并：同一物理 Hub 在数据中更换过代码，统一到当前代码，避免矩阵出现「旧码消失 / 新码凭空出现」的趋势断裂。
+   归并同时作用于始发(_hubO)与目的(_hubD)两个维度（与既有 CNO→ONT / NJ070→EWR 一致）。
+   - CNO.G → ONT.G：2026-08 起 CNO 编码停用改用 ONT（始发/目的均如此，见月度分布）
+   - NJ070 → EWR.G：NJ070 为 EWR 的站点级编码
+   - 2026-10-29 新增子码归并（用户指定，始发/目的均适用）：
+       AT303→ATL.G；BA210/NY112→EWR.G；DF750/DFW.G/IA770→IAH.G；LA900/SE981→ONT.G；WI531→ORD.G */
+const HUB_ALIAS={'CNO':'ONT.G','CNO.G':'ONT.G','NJ070':'EWR.G',
+  'AT303':'ATL.G','BA210':'EWR.G','NY112':'EWR.G',
+  'DF750':'IAH.G','DFW':'IAH.G','IA770':'IAH.G',
+  'LA900':'ONT.G','SE981':'ONT.G','WI531':'ORD.G'};
+function hubAlias(v){
+  if(!v)return'';
+  const k=String(v).trim();
+  if(!k)return'';
+  return HUB_ALIAS[k]||HUB_ALIAS[k.split('.')[0]]||k;
+}
+/* 参与分组/展示的维度列：解析阶段不做 trim，这里集中规范化一次，下游无需重复 trim */
+const NORM_COLS=['周次','发件大区','目的大区','客户简称','重量段','GF_ZONE_FEDEX',
+  '快递员领件站点','运单号','实际始发Hub中心','目的Hub中心','收入匹配'];
+/* 超尺寸分类：OS > AHS-W > AHS-H > 普货（与交接包 transform.classify_oversize 口径一致）
+   长缺失整单归普货；宽缺失不阻断 AHS-H 判定。 */
+function classifyOversize(L,W,H,Wt){
+  // 口径对齐交接包 transform.classify_oversize：OS > AHS-W > AHS-H > 普货
+  const l=parseFloat(L),w=parseFloat(W),h=parseFloat(H),wt=parseFloat(Wt);
+  const lOk=!isNaN(l),wOk=!isNaN(w),hOk=!isNaN(h),wtOk=!isNaN(wt);
+  if(!lOk)return '普货';                       // 长缺失 → 普货（交接包：pd.isna(L) 直接返普货）
+  let girth=null; if(wOk&&hOk)girth=l+2*w+2*h;
+  if((l>=243&&l<274)||(girth!=null&&girth>=330&&girth<419))return 'OS';
+  if(wtOk&&wt>=22.6796)return 'AHS-W';
+  const wok=!wOk||w<=76;                      // 宽缺失视为通过（交接包：pd.isna(W) or W<=76）
+  if((l>=121&&l<243)||(girth!=null&&girth>=266&&girth<330)){if(wok)return 'AHS-H';}
+  return '普货';
+}
+function derive(r){
+  for(let i=0;i<NORM_COLS.length;i++){const k=NORM_COLS[i];if(r[k]!=null)r[k]=String(r[k]).trim();}
+  // Hub 中心 → 大区 修正（覆盖原大区，用于跨区口径校正）
+  const hKeysO=['实际始发Hub中心','实际始发 Hub中心','始发Hub中心'];
+  const hKeysD=['实际目的Hub中心','实际目的 Hub中心','目的Hub中心'];
+  const hcolO=hKeysO.find(c=>r[c]!=null&&r[c]!=='');
+  const hcolD=hKeysD.find(c=>r[c]!=null&&r[c]!='');
+  // 先做别名归并（CNO→ONT、NJ070→EWR），再据此校正大区；_hubO/_hubD 供 HUB 矩阵热力图直接使用
+  const hO=hubAlias(hcolO?r[hcolO]:''),hD=hubAlias(hcolD?r[hcolD]:'');
+  r._hubO=hO;r._hubD=hD;
+  const ro=hubRegionOf(hO),rd=hubRegionOf(hD);
+  if(ro)r['发件大区']=ro;
+  if(rd)r['目的大区']=rd;
+  // 剔除目的大区脏值（服务类型「Ground」混入大区字段）；经 Hub 中心校正后仍未归入有效大区则整行剔除
+  if(DROP_DEST_REGIONS.has((r['目的大区']||'').toString().trim()))return null;
+  // 优先用数据自带的「周次」；缺失时按 OG首次签入时间 计算 ISO 周次（周一为起点）
+  let wk=(r['周次']||'').toString().trim();
+  if(!wk){const ds=(r['OG首次签入时间(年-月-日)']||'').toString().trim();if(ds)wk=isoWeekOf(ds);}
+  r._week=wk;
+  const dt=r['OG首次签入时间(年-月-日)'];
+  r._dateStr=(dt!=null&&dt!=='')?fmtD(dt):'';
+  r._dateVal=dt;
+  r._month=(r._dateStr&&r._dateStr.length>=7)?r._dateStr.slice(0,7):'';
+  // 记录每个周次的最早日期，供展示层换算「周次 → 所属年度」使用
+  if(wk&&r._dateStr){const wm0=WEEK_MIN[wk];if(wm0===undefined||r._dateStr<wm0)WEEK_MIN[wk]=r._dateStr;}
+  const o=(r['发件大区']||'').toString().trim(),d=(r['目的大区']||'').toString().trim();
+  r['是否跨区注入']=(o&&d)?(o===d?'否':'是'):'--';
+  const s=(r['快递员领件站点']||'').toString().trim();
+  r['目的站点']=s?s.substring(0,5):'--';
+  r._oid=(r['运单号']||'').toString().trim();
+  r['超尺寸']=classifyOversize(r['长(cm)(求和)'],r['宽(cm)(求和)'],r['高(cm)(求和)'],r['重量(kg)(求和)']);
+  return r
+}
+/* ===== 轻量 CSV 解析（自写，不依赖 SheetJS）=====
+   性能要点（168 万行实测）：
+   1) 逐行 slice + 无引号行走 split(',') 快路径，避免整文件逐字符扫描；
+   2) 列裁剪：只保留看板实际使用的列，其余列跳过（降内存、少建属性）；
+   3) 不做全字段 trim，交由 derive() 对关键维度列按需规范化。
+   用于绕过 SheetJS 对超大文件（行数过多 / 单表解压后数百 MB）的解析失败。 */
+const KEEP_COLS=['周次','OG首次签入时间(年-月-日)','发件大区','目的大区','客户简称','重量段',
+  '快递员领件站点','运单号','实际始发Hub中心','目的Hub中心','GF_ZONE_FEDEX',
+  '重量(lb)','体积(m³)','妥投耗时(h)','记账成本(未税)','收入金额(管报)','收入匹配',
+  '长(cm)(求和)','宽(cm)(求和)','高(cm)(求和)','重量(kg)(求和)'];
+const KEEP_IDX={};KEEP_COLS.forEach(function(c,i){KEEP_IDX[c]=i});
+/* 单行切分：无引号时直接 split（绝大多数行） */
+function splitCSVLine(s){
+  if(s.indexOf('"')<0)return s.split(',');
+  const res=[];let f='',inQ=false;
+  for(let i=0;i<s.length;i++){
+    const c=s[i];
+    if(inQ){
+      if(c==='"'){ if(s[i+1]==='"'){f+='"';i++;} else inQ=false; }
+      else f+=c;
+    }else{
+      if(c==='"')inQ=true;
+      else if(c===','){res.push(f);f='';}
+      else f+=c;
+    }
+  }
+  res.push(f);return res;
+}
+/* rowFn：可选的行处理器（传入 derive），在解析循环内同步完成派生与脏行剔除，
+   省去「先建全量数组、再 map+filter」的两次额外遍历 */
+function parseCSV(text,rowFn){
+  let nl=text.indexOf('\n');
+  if(nl<0)return [];
+  let headRaw=text.slice(0,nl);
+  if(headRaw.charCodeAt(headRaw.length-1)===13)headRaw=headRaw.slice(0,-1);
+  const head=splitCSVLine(headRaw);
+  // 列映射：表头列下标 -> 保留列下标（-1 表示该列不使用）
+  const map=new Array(head.length);
+  for(let i=0;i<head.length;i++){
+    const h=head[i].trim();
+    map[i]=(h in KEEP_IDX)?KEEP_IDX[h]:-1;
+  }
+  const out=[];
+  let pos=nl+1,len=text.length;
+  while(pos<len){
+    let e=text.indexOf('\n',pos);
+    if(e<0)e=len;
+    let line=text.slice(pos,e);
+    pos=e+1;
+    if(line.charCodeAt(line.length-1)===13)line=line.slice(0,-1); // 去 \r
+    if(!line)continue;                                             // 跳过空行
+    const cells=splitCSVLine(line);
+    const obj={};
+    for(let c=0;c<cells.length;c++){
+      const k=map[c];
+      if(k>=0)obj[KEEP_COLS[k]]=cells[c];
+    }
+    if(rowFn){const r=rowFn(obj);if(r)out.push(r);}
+    else out.push(obj);
+  }
+  return out;
+}
+function parseExcel(d,t){
+  if(t==='string'){ // CSV：走自写解析器，规避 SheetJS 行数上限；derive 在解析循环内同步执行
+    return parseCSV(d,derive);
+  }
+  // .xlsx / .xls：先试 SheetJS
+  try{
+    const wb=XLSX.read(d,{type:t||'array'});
+    const ws=wb.Sheets[wb.SheetNames[0]];
+    if(ws){
+      const rows=XLSX.utils.sheet_to_json(ws,{defval:''});
+      if(rows.length)return rows.map(r=>derive(r)).filter(Boolean);
+    }
+  }catch(e){/* 降级到下方报错提示 */}
+  throw new Error('Excel 解析失败：当前 .xlsx 单表过大，浏览器无法解析。请改用同目录的「日常监控数据源_2026.csv」导入（点导入按钮，选 .csv 文件即可）。');
+}
+/* 客户选项排序权重：T-90 日发单量（T = 数据最大日期，含 T 当天共 90 天），运单去重口径。
+   客户可达 200+ 项，按降序排列可让头部客户直接出现在列表最前，无需输入关键词翻找。 */
+function customerRank90(d){
+  const rank={};let maxD='';
+  d.forEach(function(r){if(r._dateStr&&r._dateStr>maxD)maxD=r._dateStr});
+  if(!maxD)return rank;
+  // 用 UTC 毫秒计算窗口起点：含 T 当天共 90 天（避免本地时区把窗口多算 1 天）
+  const p=maxD.split('-'),u=new Date(Date.UTC(+p[0],+p[1]-1,+p[2])-89*86400000);
+  const cut=u.getUTCFullYear()+'-'+String(u.getUTCMonth()+1).padStart(2,'0')+'-'+String(u.getUTCDate()).padStart(2,'0');
+  const seen={};
+  d.forEach(function(r){
+    if(!r._dateStr||r._dateStr<cut)return;
+    const c=(r['客户简称']||'').toString().trim();if(!c)return;
+    if(r._oid){if(!seen[c])seen[c]=new Set();if(seen[c].has(r._oid))return;seen[c].add(r._oid)}
+    rank[c]=(rank[c]||0)+1;
+  });
+  return rank;
+}
+function popFilters(d){const m={filterOriginRegion:'发件大区',filterDestRegion:'目的大区',filterDestStation:'目的站点',filterCustomer:'客户简称',filterWeight:'重量段',filterOversize:'超尺寸',filterOriginHub:'_hubO',filterDestHub:'_hubD'};
+  const rk=customerRank90(d);   // 仅客户简称按 T-90 日发单量降序，其余筛选项保持原有序（大区按 REGION_ORDER、其他按字典序）
+  Object.entries(m).forEach(([id,col])=>{const el=document.getElementById(id),s=new Set();d.forEach(r=>{const v=(r[col]||'').toString().trim();if(v)s.add(v)});const isRegion=(id==='filterOriginRegion'||id==='filterDestRegion');
+    let cmp=void 0;
+    if(isRegion)cmp=regionSort;
+    else if(id==='filterCustomer')cmp=function(a,b){return((rk[b]||0)-(rk[a]||0))||a.localeCompare(b)};
+    el.innerHTML='<option value="">全部</option>'+[...s].sort(cmp).map(v=>'<option value="'+v.replace(/"/g,'&quot;')+'">'+v+'</option>').join('')});
+  // 关联大区：发件大区 ∪ 目的大区 的并集作为可选项（命中任一即通过）
+  const relEl=document.getElementById('filterRelatedRegion');
+  if(relEl){const s=new Set();d.forEach(r=>{const o=(r['发件大区']||'').toString().trim(),dd=(r['目的大区']||'').toString().trim();if(o)s.add(o);if(dd)s.add(dd);});
+    relEl.innerHTML='<option value="">全部</option>'+[...s].sort(regionSort).map(v=>'<option value="'+v.replace(/"/g,'&quot;')+'">'+v+'</option>').join('');}
+  syncCombos();
+}
+function applyFilters(){
+  const fdStart=document.getElementById('filterDateStart').value;
+  const fdEnd=document.getElementById('filterDateEnd').value;
+  filteredData=rawData.filter(function(r){
+    if(fdStart&&r._dateStr<fdStart)return false;
+    if(fdEnd&&r._dateStr>fdEnd)return false;
+    if(!passMulti('filterOriginRegion',r['发件大区']))return false;
+    if(!passMulti('filterDestRegion',r['目的大区']))return false;
+    if(!passMulti('filterDestStation',r['目的站点']))return false;
+    if(!passMulti('filterCustomer',r['客户简称']))return false;
+    if(!passMulti('filterCrossRegion',r['是否跨区注入']))return false;
+    if(!passMulti('filterWeight',r['重量段']))return false;
+    if(!passMulti('filterOversize',r['超尺寸']))return false;
+    if(!passMulti('filterRelatedRegion',r['目的大区'])&&!passMulti('filterRelatedRegion',r['发件大区']))return false;
+    if(!passMulti('filterOriginHub',r['_hubO']))return false;
+    if(!passMulti('filterDestHub',r['_hubD']))return false;
+    return true;
+  });
+  refreshAll();
+}
+/* 指标计算。wantQ=true 时额外计算 A-D 时长分位数（P50/P90/P95，成本较高，仅主视图调用）。A-D 时长指标以 P95 为「达成值」，替代原平均值（均值被长尾拉高，分位数更能反映真实体验）。
+   收入/成本按「运单去重」累加，与单量口径保持一致（一行=一票，故等价于逐行求和，但对重复行安全）。 */
+function calc(d,wantQ){
+  const os=new Set(),ds=new Set();let tw=0,tv=0,tz=0,td=0,dc=0,tri=0,trc=0,oRev=0,oCost=0,triB=0,trcB=0,nB=0;
+  let nOS=0,nAHSW=0,nAHSH=0,nPlain=0,nOv=0;
+  let tdc=0,dcc=0,tdl=0,dcl=0; // A-D 时长：跨区注入 / 本区揽派 各自累计（用于趋势图拆线）
+  let nw=0,nv=0,nz=0; // 有效值计数：重量/体积/ZONE 为空的行不计入分母，避免被当作 0 拉低均值
+  const cs=new Set(),cds=new Set(),ls=new Set(),lds=new Set();const qs=[],qsc=[],qsl=[];
+  d.forEach(r=>{
+    const cross=(r['是否跨区注入']||'').toString().trim();const isCross=cross==='是';
+    if(r._oid){
+      if(!os.has(r._oid)&&hasRevenue){
+        const rv=parseFloat(r[COL_REV]);if(!isNaN(rv)){tri+=rv;oRev++}
+        const ct=parseFloat(r[COL_COST]);if(!isNaN(ct)){trc+=ct;oCost++}
+        if(!isNaN(rv)&&!isNaN(ct)){triB+=rv;trcB+=ct;nB++;}   // 同一订单集合：收入与成本均有的订单
+      }
+      os.add(r._oid);
+    }
+    if(r._dateStr)ds.add(r._dateStr);
+    const wv=parseFloat(r['重量(lb)']);if(!isNaN(wv)){tw+=wv;nw++}
+    const vv=parseFloat(r['体积(m³)']);if(!isNaN(vv)){tv+=vv;nv++}
+    const zv=parseFloat(r['GF_ZONE_FEDEX']);if(!isNaN(zv)){tz+=zv;nz++}
+    const dd=parseFloat(r['妥投耗时(h)']);if(dd&&!isNaN(dd)){td+=dd;dc++;if(wantQ){qs.push(dd);if(isCross)qsc.push(dd);else if(cross==='否')qsl.push(dd)};if(isCross){tdc+=dd;dcc++}else if(cross==='否'){tdl+=dd;dcl++}}
+    if(r._oid){if(isCross){cs.add(r._oid);if(r._dateStr)cds.add(r._dateStr)}else if(cross==='否'){ls.add(r._oid);if(r._dateStr)lds.add(r._dateStr)}}
+    const ov=r['超尺寸'];
+    if(ov==='OS')nOS++;else if(ov==='AHS-W')nAHSW++;else if(ov==='AHS-H')nAHSH++;else if(ov==='普货')nPlain++;
+    nOv++;
+  });
+  const oc=os.size,nd=ds.size;
+  let p50=null,p90=null,p95=null,p95c=null,p95l=null;
+  if(wantQ){
+    if(qs.length){qs.sort(function(a,b){return a-b});p50=qs[Math.max(0,Math.ceil(qs.length*0.5)-1)];p90=qs[Math.max(0,Math.ceil(qs.length*0.9)-1)];p95=qs[Math.max(0,Math.ceil(qs.length*0.95)-1)]}
+    if(qsc.length){qsc.sort(function(a,b){return a-b});p95c=qsc[Math.max(0,Math.ceil(qsc.length*0.95)-1)]}
+    if(qsl.length){qsl.sort(function(a,b){return a-b});p95l=qsl[Math.max(0,Math.ceil(qsl.length*0.95)-1)]}
+  }
+  /* cov = 收入覆盖率：已匹配收入的去重订单数 / 全部去重订单数。
+     低于 95% 时（如 2026-07 仅 36.8%）单票收入/毛利的分母偏小，指标不可横比，页面会高亮提示。 */
+  return{ao:nd?oc/nd:0,aw:nw?tw/nw:0,av:nv?tv/nv:0,az:nz?tz/nz:0,ad:p95!=null?p95:(dc?td/dc:0),adc:p95c!=null?p95c:(dcc?tdc/dcc:0),adl:p95l!=null?p95l:(dcl?tdl/dcl:0),
+    ac:cds.size?cs.size/cds.size:0,al:lds.size?ls.size/lds.size:0,
+    cn:cs.size,ln:ls.size,
+    pr:oRev?tri/oRev:0,pc:oCost?trc/oCost:0,pg:nB?(triB-trcB)/nB:0,gm:triB?(triB-trcB)/triB*100:0,adn:dc,
+    cov:oc?oRev/oc*100:0,
+    ov:{OS:nOS,AHSW:nAHSW,AHSH:nAHSH,plain:nPlain,total:nOv},
+    p50:p50,p90:p90,p95:p95,missD:d.length?((d.length-dc)/d.length*100):0}
+}
+function fmtC(cur,prv,prec){if(prv==null||prv===0)return{t:'--',c:'flat',rate:'--',delta:'--'};prec=(prec==null?1:prec);const p=(cur-prv)/prv,s=(p*100).toFixed(1);const d=cur-prv,ds=(d>=0?'+':'-')+Math.abs(d).toFixed(prec);const delta='Δ'+ds;if(p>0)return{t:'↑ '+s+'%　'+delta,c:'up',rate:'↑ '+s+'%',delta:delta};if(p<0)return{t:'↓ '+Math.abs(s)+'%　'+delta,c:'down',rate:'↓ '+Math.abs(s)+'%',delta:delta};return{t:'→ 0.0%　'+delta,c:'flat',rate:'→ 0.0%',delta:delta}}
+
+/* 不含开始/结束日期的过滤口径（受其他筛选栏 + 周次多选影响），KPI 与热力图共用 */
+/* 各筛选框均为多选：未勾选 = 不过滤，已勾选 = 命中任一值即通过 */
+function nonDatePass(r){
+  if(!passMulti('filterOriginRegion',r['发件大区']))return false;
+  if(!passMulti('filterDestRegion',r['目的大区']))return false;
+  if(!passMulti('filterDestStation',r['目的站点']))return false;
+  if(!passMulti('filterCustomer',r['客户简称']))return false;
+  if(!passMulti('filterCrossRegion',r['是否跨区注入']))return false;
+  if(!passMulti('filterWeight',r['重量段']))return false;
+  if(!passMulti('filterOversize',r['超尺寸']))return false;
+  if(!passMulti('filterRelatedRegion',r['目的大区'])&&!passMulti('filterRelatedRegion',r['发件大区']))return false;
+  if(!passMulti('filterOriginHub',r['_hubO']))return false;
+  if(!passMulti('filterDestHub',r['_hubD']))return false;
+  return true;
+}
+function scopeData(set){
+  const fdStart=document.getElementById('filterDateStart').value;
+  const fdEnd=document.getElementById('filterDateEnd').value;
+  return rawData.filter(r=>{
+    // 先应用非日期筛选
+    if(!nonDatePass(r))return false;
+    // 再应用周期（周/月）筛选
+    if(set.size>0&&!set.has(periodOf(r)))return false;
+    // 再应用日期筛选
+    if(fdStart&&r._dateStr<fdStart)return false;
+    if(fdEnd&&r._dateStr>fdEnd)return false;
+    return true;
+  });
+}
+
+/* ===== 可搜索下拉：把筛选栏所有 select 升级为「输入即筛选」组合框 =====
+   - 保留原 select 作为数据源与取值载体（el.value 语义不变），applyFilters / nonDatePass / scopeData 无需改动
+   - 支持多关键词（空格分隔，需全部命中）、↑↓ 选择、Enter 确认、Esc 关闭
+   - 选项数多时只渲染前 300 项，提示继续输入缩小范围（客户 196 / 站点数百仍能秒开） */
+const COMBOS={};
+function makeSearchable(sel){
+  if(!sel||sel.dataset.combo)return;
+  sel.dataset.combo='1';
+  const wrap=document.createElement('div');wrap.className='combo';
+  const input=document.createElement('input');
+  input.type='text';input.className='combo-input';input.autocomplete='off';
+  const clr=document.createElement('span');clr.className='combo-clear';clr.textContent='×';clr.title='清空选择';
+  const caret=document.createElement('span');caret.className='combo-caret';
+  const panel=document.createElement('div');panel.className='combo-panel';
+  wrap.appendChild(input);wrap.appendChild(clr);wrap.appendChild(caret);wrap.appendChild(panel);
+  sel.style.display='none';
+  sel.parentNode.insertBefore(wrap,sel);
+  const rec={el:sel,input:input,panel:panel,vals:new Set(),idx:-1};
+  COMBOS[sel.id]=rec;
+  let list=[];
+  // 已选结果写在 placeholder，输入框始终只用于输入筛选关键词（两者互不干扰）
+  const updPh=function(){
+    const n=rec.vals.size;
+    input.placeholder=n?('已选 '+n+' 项：'+Array.from(rec.vals).slice(0,3).join('、')+(n>3?' …':'')):'全部（可多选 · 可输入筛选）';
+    input.classList.toggle('has-val',n>0);
+    clr.style.display=n?'':'none';
+  };
+  rec.updPh=updPh;updPh();
+  const fire=function(){sel.dispatchEvent(new Event('change'))};
+  const render=function(q){
+    const kw=(q||'').trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const all=Array.prototype.slice.call(sel.options).map(function(o){return {v:o.value,t:o.textContent||'全部'}});
+    list=all.filter(function(o){return !kw.length||kw.every(function(k){return o.t.toLowerCase().indexOf(k)>=0})});
+    panel.innerHTML='';
+    const act=document.createElement('div');act.className='combo-actions';
+    const bAll=document.createElement('button');bAll.type='button';bAll.className='ca';bAll.textContent='全选当前列表';
+    const bNone=document.createElement('button');bNone.type='button';bNone.className='ca';bNone.textContent='清空';
+    bAll.onmousedown=function(ev){ev.preventDefault();list.forEach(function(o){if(o.v)rec.vals.add(o.v)});updPh();render(input.value);fire()};
+    bNone.onmousedown=function(ev){ev.preventDefault();rec.vals.clear();updPh();render(input.value);fire()};
+    act.appendChild(bAll);act.appendChild(bNone);panel.appendChild(act);
+    if(!list.length){const e=document.createElement('div');e.className='combo-empty';e.textContent='无匹配项';panel.appendChild(e);return}
+    const cap=Math.min(list.length,300);
+    for(let i=0;i<cap;i++){
+      const o=list[i];
+      const d=document.createElement('div');
+      d.className='combo-opt'+(rec.vals.has(o.v)?' sel':'');
+      const ck=document.createElement('span');ck.className='ck';
+      const tx=document.createElement('span');tx.className='tx';tx.textContent=o.t;
+      d.appendChild(ck);d.appendChild(tx);
+      d.onmousedown=function(ev){ev.preventDefault();toggle(i)};
+      panel.appendChild(d);
+    }
+    if(list.length>cap){const e=document.createElement('div');e.className='combo-empty';e.textContent='匹配 '+list.length+' 项，仅显示前 '+cap+' 项，请继续输入缩小范围';panel.appendChild(e)}
+  };
+  const toggle=function(i){
+    const o=list[i];if(!o)return;
+    if(!o.v)rec.vals.clear();                     // 点「全部」= 清空选择
+    else if(rec.vals.has(o.v))rec.vals.delete(o.v);
+    else rec.vals.add(o.v);
+    updPh();render(input.value);fire();           // 保留关键词，便于连续勾选同类项
+  };
+  const open=function(){wrap.classList.add('open');input.value='';render('');rec.idx=-1;};
+  const close=function(){wrap.classList.remove('open');input.value=''};
+  clr.onmousedown=function(ev){ev.preventDefault();rec.vals.clear();updPh();render(input.value);fire()};
+  input.addEventListener('focus',open);
+  input.addEventListener('click',open);
+  input.addEventListener('input',function(){wrap.classList.add('open');render(input.value);rec.idx=-1});
+  input.addEventListener('blur',function(){setTimeout(close,180)});
+  input.addEventListener('keydown',function(e){
+    const items=panel.querySelectorAll('.combo-opt');
+    if(e.key==='ArrowDown'){e.preventDefault();rec.idx=Math.min(rec.idx+1,items.length-1);hl(items)}
+    else if(e.key==='ArrowUp'){e.preventDefault();rec.idx=Math.max(rec.idx-1,0);hl(items)}
+    else if(e.key==='Enter'){e.preventDefault();if(rec.idx>=0)toggle(rec.idx);else if(items.length)toggle(0)}
+    else if(e.key==='Escape'){close();input.blur()}
+  });
+  const hl=function(items){
+    for(let i=0;i<items.length;i++)items[i].classList.toggle('active',i===rec.idx);
+    if(items[rec.idx]&&items[rec.idx].scrollIntoView)items[rec.idx].scrollIntoView({block:'nearest'});
+  };
+  document.addEventListener('click',function(e){if(!wrap.contains(e.target))close()});
+}
+/* 多选判定：未勾选任何值 = 不过滤；已勾选则命中任一值即通过 */
+function passMulti(id,val){
+  const c=COMBOS[id];
+  if(!c||!c.vals.size)return true;
+  return c.vals.has((val==null?'':val).toString().trim());
+}
+/* 数据源 / 筛选项重建后清空选择（旧值可能已不存在） */
+function syncCombos(){
+  Object.keys(COMBOS).forEach(function(id){
+    const c=COMBOS[id];
+    c.vals.clear();c.input.value='';c.updPh();
+  });
+}
+
+/* 构建周期（周/月）下拉式多选 */
+function buildPeriodDropdown(){
+  const periods=ALL_PERIODS.length?ALL_PERIODS:getPeriods(rawData);
+  const panel=document.getElementById('weekPanel');
+  panel.innerHTML='';
+  // 周期较多时（周 38 / 月 9）支持输入筛选
+  const sbox=document.createElement('div');sbox.className='week-search';
+  const si=document.createElement('input');si.type='text';si.autocomplete='off';
+  si.placeholder='输入筛选'+(viewMode==='week'?'周次':(viewMode==='day'?'日期':'月份'));
+  sbox.appendChild(si);panel.appendChild(sbox);
+  // 「全部（累计）」选项
+  const allOpt=mkPeriodOption('','全部（累计）',true);allOpt.dataset.all='1';
+  panel.appendChild(allOpt);
+  // 各周期选项：降序展示（最新周期在最上），便于快速勾选近期周期；
+  // 注意只反转展示顺序，ALL_PERIODS 仍保持升序（upd() 的环比依赖 allP[idx-1] 为上一周期）
+  periods.slice().reverse().forEach(function(p){const o=mkPeriodOption(p,pLabel(p)+(PARTIAL.has(p)?' · 进行中':''),false);o.classList.add('divider');panel.appendChild(o);});
+  // 输入即筛选周期列表（「全部（累计）」始终保持可见，便于一键清空）
+  si.oninput=function(){
+    const q=si.value.trim().toLowerCase();
+    panel.querySelectorAll('.week-option').forEach(function(o){
+      if(o.dataset.all)return;
+      o.style.display=(!q||o.textContent.toLowerCase().indexOf(q)>=0)?'':'none';
+    });
+  };
+  // 触发按钮：点击开合面板
+  const ws=document.getElementById('weekSelect');
+  const trig=document.getElementById('weekTrigger');
+  trig.onclick=function(e){e.stopPropagation();ws.classList.toggle('open');};
+  panel.onclick=function(e){e.stopPropagation();};
+  document.addEventListener('click',function(){ws.classList.remove('open');});
+  syncPeriodChecks();updatePeriodTrigger();
+}
+function mkPeriodOption(val,label,isAll){
+  const opt=document.createElement('label');
+  opt.className='week-option';
+  const cb=document.createElement('input');
+  cb.type='checkbox';cb.value=val;cb.dataset.week=val;
+  const txt=document.createElement('span');txt.textContent=label;
+  opt.appendChild(cb);opt.appendChild(txt);
+  cb.onchange=function(){
+    const set=selectedPeriodSet();
+    if(isAll){set.clear();}       // 选「全部」即清空具体周期（累计口径）
+    else{if(cb.checked)set.add(val);else set.delete(val);}
+    syncPeriodChecks();updatePeriodTrigger();upd();
+  };
+  return opt;
+}
+/* 同步复选框勾选状态与当前周期选择集一致 */
+function syncPeriodChecks(){
+  const panel=document.getElementById('weekPanel');
+  const allCb=panel.querySelector('.week-option input[data-week=""]');
+  const cbs=panel.querySelectorAll('.week-option input[data-week]:not([data-week=""])');
+  if(allCb)allCb.checked=(selectedPeriodSet().size===0);
+  cbs.forEach(function(cb){cb.checked=selectedPeriodSet().has(cb.dataset.week);});
+}
+/* 触发按钮文案：全部 / 单周期 / 已选 N 周期 */
+function updatePeriodTrigger(){
+  const t=document.getElementById('weekTriggerText');
+  const set=selectedPeriodSet();
+  if(set.size===0)t.textContent='全部（累计）';
+  else if(set.size===1)t.textContent=pLabel([...set][0]);
+  else t.textContent='已选 '+set.size+(viewMode==='week'?' 周':(viewMode==='day'?' 天':' 月'));
+}
+
+let _lastScope=null;
+/* 运营分析/经营分析 TAB 的 KPI 卡：复用 upd() 已算好的当前筛选口径 cur/prv（避免重复全量扫描） */
+function renderScopeKpis(){
+  const sc=_lastScope; if(!sc)return;
+  const cur=sc.cur,prv=sc.prv,hasData=sc.hasData,noRev=!hasRevenue;
+  function fill(p,val,unit,prec,prvVal,subText,isNoRev){
+    const el=document.getElementById(p),cel=document.getElementById(p+'Change'),sub=document.getElementById(p+'Sub');
+    if(isNoRev){ if(el)el.innerHTML='--<span class="unit">需含收入数据源</span>'; if(cel){cel.innerHTML='<span>--</span><span>--</span>';cel.className='kpi-change flat';} }
+    else if(!hasData){ if(el)el.innerHTML='—<span class="unit">'+unit+'</span>'; if(cel){cel.innerHTML='<span>--</span><span>--</span>';cel.className='kpi-change flat';} }
+    else { if(el)el.innerHTML=val.toFixed(prec)+'<span class="unit">'+unit+'</span>'; if(cel){const f=fmtC(val,prvVal,prec);cel.innerHTML='<span>'+f.rate+'</span><span>'+f.delta+'</span>';cel.className='kpi-change '+f.c;} }
+    if(sub&&subText!=null)sub.textContent=subText;
+  }
+  fill('mtOrder',cur.ao,'单/天',1,prv?prv.ao:null,'运单去重数 / 天数去重');
+  fill('mtWeight',cur.aw,'lb',2,prv?prv.aw:null,'总重量 / 有重量值的订单数');
+  fill('mtVolume',cur.av,'m³',4,prv?prv.av:null,'总体积 / 有体积值的订单数');
+  fill('mtZone',cur.az,'',1,prv?prv.az:null,'ZONE合计 / 有ZONE值的订单数');
+  fill('mtDelivery',cur.ad,'h',1,prv?prv.ad:null,(cur.p95!=null?('P95 '+cur.p95.toFixed(1)+'h ｜ P50 '+cur.p50.toFixed(1)+'h ｜ n='+cur.adn+' ｜ 缺失 '+cur.missD.toFixed(2)+'%'+(cur.adn<RHD_MIN_N?'（样本<'+RHD_MIN_N+'，P95不稳定）':'')):'95分位达成值（P95）'));
+  fill('mtCross',cur.ac,'单/天',1,prv?prv.ac:null,'跨区运单去重数 / 跨区出现天数');
+  fill('mtLocal',cur.al,'单/天',1,prv?prv.al:null,'本区运单去重数 / 本区出现天数');
+  fill('mtCrossRatio',(cur.cn+cur.ln)?cur.cn/(cur.cn+cur.ln)*100:0,'%',1,(prv&&(prv.cn+prv.ln))?prv.cn/(prv.cn+prv.ln)*100:null,'跨区去重订单数 ÷ (跨区+本区去重订单数)');
+  fill('bizRevPer',cur.pr,'$/票',2,prv?prv.pr:null,'收入金额(管报) / 有收入值订单数',noRev);
+  fill('bizCostPer',cur.pc,'$/票',2,prv?prv.pc:null,'派送成本(记账成本·未税) / 有成本订单数',noRev);
+  fill('bizProfit',cur.pg,'$/票',2,prv?prv.pg:null,(hasRevenue?('A毛利率 '+cur.gm.toFixed(1)+'% ｜ 收入覆盖率 '+cur.cov.toFixed(1)+'% ｜ 平均收入 − 平均派送成本（按收入与成本均有的订单）'):'需含收入数据源'),noRev);
+}
+function upd(){
+  const set=selectedPeriodSet();
+  const data=scopeData(set);
+  const cur=calc(data,true);
+  let prv=null,prevData=null;
+  // 仅单选某一周期时显示环比上一周期；多选或"全部"仅展示绝对值
+  // prevData 复用于两张矩阵热力图的环比，避免同一份数据被 filter 三次
+  if(set.size===1){
+    const p=[...set][0];
+    const allP=ALL_PERIODS,idx=allP.indexOf(p);
+    if(idx>0){const pp=allP[idx-1];prevData=scopeData(new Set([pp]));if(prevData.length)prv=calc(prevData,true)}
+  }
+  _lastScope={cur:cur,prv:prv,hasData:data.length>0};
+  const kpis=[
+    {id:'kpiOrder',v:cur.ao,u:'单/天',p:1,ch:'kpiOrderChange',pr:prv?prv.ao:null},
+    {id:'kpiWeight',v:cur.aw,u:'lb',p:2,ch:'kpiWeightChange',pr:prv?prv.aw:null},
+    {id:'kpiVolume',v:cur.av,u:'m³',p:4,ch:'kpiVolumeChange',pr:prv?prv.av:null},
+    {id:'kpiZone',v:cur.az,u:'',p:1,ch:'kpiZoneChange',pr:prv?prv.az:null},
+    {id:'kpiDelivery',v:cur.ad,u:'h',p:1,ch:'kpiDeliveryChange',pr:prv?prv.ad:null},
+    {id:'kpiCross',v:cur.ac,u:'单/天',p:1,ch:'kpiCrossChange',pr:prv?prv.ac:null},
+    {id:'kpiLocal',v:cur.al,u:'单/天',p:1,ch:'kpiLocalChange',pr:prv?prv.al:null},
+    {id:'kpiCrossRatio',v:(cur.cn+cur.ln)?cur.cn/(cur.cn+cur.ln)*100:0,u:'%',p:1,ch:'kpiCrossRatioChange',pr:(prv&&(prv.cn+prv.ln))?prv.cn/(prv.cn+prv.ln)*100:null},
+    {id:'kpiRevPer',v:cur.pr,u:'$/票',p:2,ch:'kpiRevPerChange',pr:prv?prv.pr:null,noRev:true},
+    {id:'kpiCostPer',v:cur.pc,u:'$/票',p:2,ch:'kpiCostPerChange',pr:prv?prv.pc:null,noRev:true},
+    {id:'kpiProfit',v:cur.pg,u:'$/票',p:2,ch:'kpiProfitChange',pr:prv?prv.pg:null,noRev:true}
+  ];
+  kpis.forEach(k=>{
+    const el=document.getElementById(k.id),cel=document.getElementById(k.ch);
+    if(!data.length){ if(el)el.innerHTML='—<span class="unit">'+k.u+'</span>'; if(cel){cel.innerHTML='<span>--</span><span>--</span>';cel.className='kpi-change flat';} return; }
+    if(k.noRev&&!hasRevenue){
+      if(el)el.innerHTML='--<span class="unit">需含收入数据源</span>';
+      if(cel){cel.innerHTML='<span>--</span><span>--</span>';cel.className='kpi-change flat'}
+      return;
+    }
+    if(el)el.innerHTML=k.v.toFixed(k.p)+'<span class="unit">'+k.u+'</span>';
+    if(cel){const f=fmtC(k.v,k.pr,k.p);cel.innerHTML='<span>'+f.rate+'</span><span>'+f.delta+'</span>';cel.className='kpi-change '+f.c}
+  });
+  // A-D 时长以 P95 为达成值（均值被长尾拉高，分位数更能反映真实体验）；补充 P50 与缺失率作参考
+  const dsub=document.getElementById('kpiDeliverySub');
+  if(dsub)dsub.textContent=(cur.p95!=null)
+    ? ('P95 '+cur.p95.toFixed(1)+'h ｜ P50 '+cur.p50.toFixed(1)+'h ｜ n='+cur.adn+' ｜ 缺失 '+cur.missD.toFixed(2)+'%'+(cur.adn<RHD_MIN_N?'（样本<'+RHD_MIN_N+'，P95不稳定）':''))
+    : '95分位达成值（P95）';
+  const psub=document.getElementById('kpiProfitSub');
+  if(psub)psub.textContent=hasRevenue
+    ? ('A毛利率 '+cur.gm.toFixed(1)+'% ｜ 收入覆盖率 '+cur.cov.toFixed(1)+'% ｜ 平均收入 − 平均派送成本（按收入与成本均有的订单）')
+    : '需含收入数据源';
+  // 数据可信度提示：①进行中周期（数据不完整）②收入匹配率偏低（单票收入/毛利不可横比）
+  const pt=document.getElementById('partialTip');
+  if(pt){
+    const all=ALL_PERIODS;
+    const sel=(set.size?[...set]:all);
+    const hit=sel.filter(p=>PARTIAL.has(p));
+    const low=sel.filter(p=>PERIOD_COV[p]!==undefined&&PERIOD_COV[p]<95);
+    const msgs=[];
+    if(hit.length)msgs.push('⚠ 含进行中'+(viewMode==='week'?'周':(viewMode==='day'?'日':'月'))+'：'+hit.map(pLabel).join('、')+'（数据不完整）');
+    // 日维度下低覆盖率周期可能上百个，只列出前 8 个并汇总总数，避免提示条过长
+    if(low.length){const lowShow=low.slice(0,8);msgs.push('⚠ 收入匹配率偏低：'+lowShow.map(p=>pLabel(p)+' '+PERIOD_COV[p].toFixed(0)+'%').join('、')+(low.length>8?(' 等 '+low.length+' 个周期'):'')+'（单票收入/毛利不可横比）');}
+    if(msgs.length){pt.style.display='';pt.textContent=msgs.join('　｜　')}
+    else pt.style.display='none';
+  }
+  drawHeatmap(data,prevData);drawHubHeatmap(data,prevData);drawCustomerTop(data)
+  renderBrief(cur,prv,data,prevData);
+}
+/* 周简报：根据当前筛选（cur）与上一周期（prv）自动生成文字摘要，格式对齐人工周简报。
+   仅在单选单一周期时有环比；多选/全周期仅展示绝对值。 */
+function custAgg(rows){
+  const m={};let nd=0;const ds=new Set();
+  rows.forEach(function(r){
+    if(!r._oid)return;
+    const c=(r['客户简称']||'').toString().trim()||'未标注客户';
+    const cross=(r['是否跨区注入']||'').toString().trim()==='是';
+    if(!m[c])m[c]={t:0,cross:0,local:0};
+    m[c].t++; if(cross)m[c].cross++; else m[c].local++;
+    if(r._dateStr)ds.add(r._dateStr);
+  });
+  return {m:m, nd:ds.size};
+}
+function signPct(cur,prv){if(prv==null||prv===0||isNaN(prv))return null;return {p:(cur-prv)/prv*100,d:cur-prv}}
+function fmtRate(sp){if(!sp)return '--';if(Math.abs(sp.p)<0.05)return '持平(+0.0%)';return (sp.p>0?'+':'−')+Math.abs(sp.p).toFixed(1)+'%'}
+function renderBrief(cur,prv,data,prevData){
+  const set=selectedPeriodSet(),head=document.getElementById('briefPeriod'),body=document.getElementById('briefBody');
+  if(!body)return;
+  const curL=(set.size===1)?pLabel([...set][0]):'当前筛选范围';
+  let prevL='';
+  if(prv){const allP=ALL_PERIODS,p=[...set][0],idx=allP.indexOf(p);if(idx>0)prevL=pLabel(allP[idx-1])}
+  if(head)head.textContent='周简报 · '+curL+(prv?('（环比 '+prevL+'）'):'（绝对值，无环比）');
+  const L=[],hasPrv=!!prv;
+  let sp=hasPrv?signPct(cur.ao,prv.ao):null;
+  L.push('日均单量：'+cur.ao.toFixed(1)+'单'+(hasPrv?('，环比'+fmtRate(sp)+'，日均'+(sp.d>=0?'增加':'减少')+Math.abs(sp.d).toFixed(0)+'单'):''));
+  sp=hasPrv?signPct(cur.aw,prv.aw):null;
+  L.push('平均重量：'+cur.aw.toFixed(2)+'LB'+(hasPrv?('，环比'+fmtRate(sp)+'，平均'+(sp.d>=0?'增加':'减少')+Math.abs(sp.d).toFixed(2)+'LB'):''));
+  sp=hasPrv?signPct(cur.av,prv.av):null;
+  L.push('平均体积：'+cur.av.toFixed(4)+'m³'+(hasPrv?('，环比'+fmtRate(sp)):''));
+  sp=hasPrv?signPct(cur.az,prv.az):null;
+  L.push('平均zone：'+cur.az.toFixed(2)+'zone'+(hasPrv?('，平均'+(sp.d>=0?'增加':'缩减')+Math.abs(sp.d).toFixed(2)+'zone'):''));
+  sp=hasPrv?signPct(cur.ad,prv.ad):null;
+  L.push('A-D时长(P95)：'+cur.ad.toFixed(1)+'h'+(hasPrv?('，环比'+fmtRate(sp)):''));
+  // A-D 时长细分：本区揽派 / 跨区注入（calc 已按 qsl/qsc 各自计算 P95 → adl/adc）
+  const _adl=cur.adl||0,_adc=cur.adc||0;
+  if(_adl>0||_adc>0){
+    const _spl=hasPrv?signPct(_adl,prv.adl||0):null;
+    const _spc=hasPrv?signPct(_adc,prv.adc||0):null;
+    L.push('  - 本区揽派：'+(_adl>0?cur.adl.toFixed(1)+'h':'--')+(hasPrv?('，环比'+fmtRate(_spl)):''));
+    L.push('  - 跨区注入：'+(_adc>0?cur.adc.toFixed(1)+'h':'--')+(hasPrv?('，环比'+fmtRate(_spc)):''));
+  }
+  if(hasPrv){
+    const spc=signPct(cur.ac,prv.ac),spl=signPct(cur.al,prv.al),den=cur.cn+cur.ln,pden=prv.cn+prv.ln;
+    const ratio=den?cur.cn/den*100:0,pratio=pden?prv.cn/pden*100:0;
+    L.push('订单流向：跨区注入'+fmtRate(spc)+'(日均'+cur.ac.toFixed(0)+'单)，本地揽派'+fmtRate(spl)+'(日均'+cur.al.toFixed(0)+'单)；跨区占比'+ratio.toFixed(1)+'%(环比周期 '+pratio.toFixed(1)+'%)');
+  }else{
+    const den=cur.cn+cur.ln;
+    L.push('订单流向：跨区注入日均'+cur.ac.toFixed(0)+'单，本地揽派日均'+cur.al.toFixed(0)+'单；跨区占比'+(den?cur.cn/den*100:0).toFixed(1)+'%');
+  }
+  if(hasRevenue){
+    sp=hasPrv?signPct(cur.pr,prv.pr):null;L.push('单票收入：'+cur.pr.toFixed(2)+'$'+(hasPrv?('，环比'+fmtRate(sp)):''));
+    sp=hasPrv?signPct(cur.pc,prv.pc):null;L.push('单票派送成本：'+cur.pc.toFixed(2)+'$'+(hasPrv?('，环比'+fmtRate(sp)):''));
+    sp=hasPrv?signPct(cur.pg,prv.pg):null;L.push('单票A毛利：'+cur.pg.toFixed(2)+'$'+(hasPrv?('，环比'+fmtRate(sp)+'；A毛利率'+cur.gm.toFixed(1)+'%(环比周期 '+prv.gm.toFixed(1)+'%)'):('；A毛利率'+cur.gm.toFixed(1)+'%')));
+  }
+  const agg=custAgg(data),top=Object.entries(agg.m).sort(function(a,b){return b[1].t-a[1].t}).slice(0,3).map(function(e){return e[0]});
+  if(top.length){
+    L.push('TOP3客户(由多至少)：'+top.join('、'));
+    const agP=hasPrv?custAgg(prevData):null,nd=agg.nd||1,ndP=agP?agP.nd||1:1;
+    top.forEach(function(c){
+      const a=agg.m[c];let t='*'+c+'：总单量'+a.t.toLocaleString('en-US');
+      if(hasPrv){const ap=agP?agP.m[c]:null;
+        if(ap){const spc=signPct(a.t,ap.t),dD=a.t/nd-ap.t/ndP,spx=signPct(a.cross,ap.cross),spl=signPct(a.local,ap.local);
+          t+='，环比'+fmtRate(spc)+'，日均'+(dD>=0?'+':'−')+Math.abs(dD).toFixed(1)+'，跨区'+fmtRate(spx)+'('+(a.cross-ap.cross>=0?'+':'−')+Math.abs(a.cross-ap.cross)+'单)，本区'+fmtRate(spl)+'('+(a.local-ap.local>=0?'+':'−')+Math.abs(a.local-ap.local)+'单)';}
+      }
+      L.push(t);
+    });
+  }
+  body.innerHTML=L.map(function(l){return '<div class="brief-line">'+l+'</div>'}).join('');
+}
+/* 全量刷新：filteredData 变化（数据源 / 筛选栏 / 周-月维度切换）时调用。
+   仅「周期勾选」变化时不重绘 updCh() —— 趋势类图表不受周期勾选影响，
+   避免每次勾选都重新聚合 168 万行。 */
+/* ===================== 运营分析 TAB ===================== */
+/* 聚合缓存：数据/筛选未变时复用，避免每次切换 TAB 都重算 170 万行 */
+let _meetAgg=null,_meetRef=null;
+/* 通用热力图渲染：行=分类、列=周期，每格显示数值并按色阶着色。
+   opt.count=true 时单元格=日均单量，下排同时显示「占当周期比重」(与运营监控热力图一致)；
+   opt.count=false 时单元格=任意指标值，颜色按 min~max 线性映射，无占比子标签。
+   m = {cats:[行标签], cols:[列标签], cell:[[值|null]], col:[列合计], row:[行合计], grand:总计} */
+var HM_STOPS=[[0,255,245,235],[0.2,253,226,200],[0.4,249,198,152],[0.6,244,160,84],[0.8,206,100,34],[1,136,56,14]];
+function hmColor(t){
+  t=Math.max(0,Math.min(1,t));
+  var a=HM_STOPS[0],b=HM_STOPS[HM_STOPS.length-1];
+  for(var i=0;i<HM_STOPS.length-1;i++){if(t>=HM_STOPS[i][0]&&t<=HM_STOPS[i+1][0]){a=HM_STOPS[i];b=HM_STOPS[i+1];break;}}
+  var k=(b[0]-a[0])?(t-a[0])/(b[0]-a[0]):0;
+  var r=Math.round(a[1]+(b[1]-a[1])*k),g=Math.round(a[2]+(b[2]-a[2])*k),bl=Math.round(a[3]+(b[3]-a[3])*k);
+  // 按 WCAG 相对亮度自动选字色：亮底用近黑字，暗底用纯白字（对比度≥4.5）
+  var _lin=function(c){c/=255;return c<=0.03928?c/12.92:Math.pow((c+0.055)/1.055,2.4);};
+  var lum=0.2126*_lin(r)+0.7152*_lin(g)+0.0722*_lin(bl);
+  return{bg:'rgb('+r+','+g+','+bl+')',dark:lum<=0.20};
+}
+function drawHM(containerId,wowId,m,opt){
+  const container=document.getElementById(containerId); if(!container)return;
+  const wow=document.getElementById(wowId);
+  container.innerHTML='';
+  if(!m||!m.cats||!m.cats.length){if(container)container.innerHTML='<div class="hm-nodata">暂无数据</div>';if(wow){wow.className='hm-wow';wow.textContent=''}return;}
+  const cats=m.cats,cols=m.cols,cell=m.cell,colA=m.col,rowA=m.row,grand=m.grand;
+  const fmt=opt.fmt||function(v){return (v==null?'':v.toFixed(1));};
+  const prec=opt.prec==null?1:opt.prec;
+  const n=cats.length,c=cols.length;
+  // 统一按全局 min~max 归一化，让色阶真正拉开：
+  // 色阶仅统计单元格值（不含行/列/总计，避免被合计格撑爆，与 drawHeatmap 一致）；
+  // 指标用线性 + gamma 0.8（略提亮中间段）。
+  const allVals=[];
+  for(let i=0;i<n;i++)for(let j=0;j<c;j++){if(cell[i][j]!=null)allVals.push(cell[i][j]);}
+  const vmn=allVals.length?Math.min.apply(null,allVals):0, vmx=allVals.length?Math.max.apply(null,allVals):1;
+  const colorOf=function(v){
+    if(v==null)return{bg:'#f6f6f6',dark:false};
+    let t=(vmx>vmn)?(v-vmn)/(vmx-vmn):0.5;t=Math.pow(Math.max(0,Math.min(1,t)),0.8);
+    return hmColor(t);
+  };
+  // 环比标签：每个单元格 / 总计行 对比上一周期（列 j-1）；表头角标对比最新周期 vs 上一周期。
+  // 与运营监控热力图（drawHeatmap）完全同口径：箭头 + 百分比，红涨绿跌。
+  const periodName=(typeof viewMode!=='undefined')?(viewMode==='week'?'周环比':(viewMode==='day'?'日环比':'月环比')):'环比';
+  const wowCell=function(cur,prev){if(prev==null||prev===0)return '';const f=fmtC(cur,prev,prec);return '<span class="cell-wow '+f.c+'">'+f.t.split('　Δ')[0]+'</span>';};
+  const colsN=c+2;
+  let html='<div class="hm-wrap"><table class="hm-table" style="--cols:'+colsN+'"><colgroup>';
+  for(let i=0;i<colsN;i++)html+='<col style="width:'+(100/colsN)+'%">';
+  html+='</colgroup><thead><tr><th class="corner">'+opt.corner+'</th>';
+  for(let j=0;j<c;j++)html+='<th>'+cols[j]+'</th>';
+  html+='<th class="total">合计</th></tr></thead><tbody>';
+  for(let i=0;i<n;i++){
+    html+='<tr><td class="row-head">'+cats[i]+'</td>';
+    for(let j=0;j<c;j++){
+      const v=cell[i][j];
+      if(v==null){html+='<td class="cell empty">—</td>';}
+      else{const col=colorOf(v);html+='<td class="cell" style="background:'+col.bg+';color:'+(col.dark?'#fff':'#3a1400')+'">'+fmt(v);
+        if(opt.count&&colA[j]>0){
+          const share=v/colA[j]*100;
+          html+='<span class="sub">'+share.toFixed(1)+'%</span>';
+          if(j>=1&&colA[j-1]>0&&cell[i][j-1]!=null){
+            const prevShare=cell[i][j-1]/colA[j-1]*100, dp=share-prevShare;
+            const sc=dp>0.05?'up':(dp<-0.05?'down':'flat'), arr=dp>0.05?'↑':(dp<-0.05?'↓':'→');
+            html+='<span class="cell-sharesub '+sc+'" title="份额环比 '+(dp>=0?'+':'')+dp.toFixed(1)+' 个百分点（'+share.toFixed(1)+'% vs '+prevShare.toFixed(1)+'%）">'+arr+Math.abs(dp).toFixed(1)+'pt</span>';
+          }
+        }
+        if(j>=1)html+=wowCell(v,cell[i][j-1]);
+        html+='</td>';}
+    }
+    const rv=rowA[i];
+    if(rv==null){html+='<td class="total">—</td>';}
+    else{const col=colorOf(rv);html+='<td class="total" style="background:'+col.bg+';color:'+(col.dark?'#fff':'#3a1400')+'">'+fmt(rv)+'</td>';}
+  }
+  html+='<tr><td class="row-head total">总计</td>';
+  for(let j=0;j<c;j++){const cv=colA[j];if(cv==null){html+='<td class="total">—</td>';}
+    else{const col=colorOf(cv);html+='<td class="total" style="background:'+col.bg+';color:'+(col.dark?'#fff':'#3a1400')+'">'+fmt(cv);
+      if(j>=1)html+=wowCell(cv,colA[j-1]);
+      html+='</td>';}}
+  if(grand==null){html+='<td class="grand">—</td></tr>';}
+  else{const col=colorOf(grand);html+='<td class="grand" style="background:'+col.bg+';color:'+(col.dark?'#fff':'#3a1400')+'">'+fmt(grand)+'</td></tr>';}
+  html+='</tbody></table>';
+  if(allVals.length&&vmx>vmn){
+    html+='<div class="hm-legend"><span>低 '+fmt(vmn)+'</span><span class="hm-legend-bar"></span><span>高 '+fmt(vmx)+'</span></div>';
+  }
+  html+='</div>';
+  container.innerHTML=html;
+  // 表头角标：最新周期 vs 上一周期 的环比（与运营监控 hmWow 同口径）
+  if(wow){
+    wow.className='hm-wow';wow.textContent='';
+    const mlen=colA.length;
+    if(mlen>=2 && colA[mlen-1]!=null && colA[mlen-2]!=null && colA[mlen-2]!==0){
+      const f=fmtC(colA[mlen-1],colA[mlen-2],prec);
+      wow.textContent=periodName+' '+f.t;
+      wow.className='hm-wow '+f.c;
+    }else if(opt.wow){wow.textContent=opt.wow;wow.className='hm-wow flat';}
+  }
+}
+// 把 发件大区×周期 矩阵渲染成「每条发件大区一条折线」的趋势图（X=周期，Y=指标值）
+// m = {cats,cols,cell,col,row,grand}；unit 用于角标（如 '%'）
+function drawLineMatrix(canvasId,wowId,m,unit,full){
+  const wow=document.getElementById(wowId);
+  const series=m.cats.map(function(cat,i){
+    return {label:cat,color:REGION_COLORS[i%REGION_COLORS.length],lastIdx:full?null:m.cols.length-1,
+      data:m.cell[i].map(function(v){return v==null?null:Math.round(v*100)/100;})};
+  });
+  chartMulti(canvasId,m.cols,series,true,false,full?9:10);
+  if(wow){
+    if(m.grand!=null){wow.textContent='全局 '+m.grand.toFixed(1)+unit;wow.className='hm-wow flat';}
+    else{wow.textContent='';wow.className='hm-wow';}
+  }
+}
+function computeMeetingAgg(){
+  if(_meetRef===filteredData&&_meetAgg)return _meetAgg;
+  const pl=getPeriods(filteredData); if(!pl.length)return null;
+  const P=pl.length,pidx={}; pl.forEach(function(p,i){pidx[p]=i});
+  const plL=pl.map(pLabel);
+
+  const cargoOf=function(r){return r['超尺寸']||'普货';};
+  const blankAcc=function(){return {os:new Set(),ds:new Set(),tri:0,oRev:0,trc:0,oCost:0,triB:0,trcB:0,nB:0,tw:0,nw:0,tv:0,nv:0,tz:0,nz:0,cs:new Set(),cds:new Set(),ls:new Set(),lds:new Set()};};
+  const stores={region:{cell:{},col:{},row:{},gwb:new Set(),gd:new Set()},
+                cust:{cell:{},col:{},row:{},gwb:new Set(),gd:new Set()},
+                wseg:{cell:{},col:{},row:{},gwb:new Set(),gd:new Set()},
+                cargo:{cell:{},col:{},row:{},gwb:new Set(),gd:new Set()}};
+  const REGS=[...new Set(filteredData.map(function(r){return (r['发件大区']||'').toString().trim();}).filter(Boolean))].sort(regionSort);
+  const regAcc={}; REGS.forEach(function(rg){regAcc[rg]={};});
+  const REGS_D=[...new Set(filteredData.map(function(r){return (r['目的大区']||'').toString().trim();}).filter(Boolean))].sort(regionSort);
+  const regAccD={}; REGS_D.forEach(function(rg){regAccD[rg]={};});
+  const custRev={}; const periodRevTotal=pl.map(function(){return 0;});
+
+  filteredData.forEach(function(r){
+    const i=pidx[periodOf(r)]; if(i===undefined)return;
+    const oid=r._oid, dstr=r._dateStr;
+    const reg=(r['发件大区']||'').toString().trim();
+    const cu=((r['客户简称']||'').toString().trim())||'未标注';
+    const ws=(r['重量段']||'').toString().trim();
+    const car=cargoOf(r);
+    function addCount(st,cat){ if(!cat)return;
+      const k=cat+'|'+i,e=st.cell[k]||(st.cell[k]={wb:new Set(),d:new Set()});
+      if(oid)e.wb.add(oid); if(dstr)e.d.add(dstr);
+      const c=st.col[i]||(st.col[i]={wb:new Set(),d:new Set()}); if(oid)c.wb.add(oid); if(dstr)c.d.add(dstr);
+      const rt=st.row[cat]||(st.row[cat]={wb:new Set(),d:new Set()}); if(oid)rt.wb.add(oid); if(dstr)rt.d.add(dstr);
+      if(oid)st.gwb.add(oid); if(dstr)st.gd.add(dstr);
+    }
+    if(reg)addCount(stores.region,reg);
+    if(cu)addCount(stores.cust,cu);
+    if(ws)addCount(stores.wseg,ws);
+    addCount(stores.cargo,car);
+    if(reg){let a=regAcc[reg][i]; if(!a){a=blankAcc();regAcc[reg][i]=a;} accumulate(a,r,oid,dstr);}
+    const dre=(r['目的大区']||'').toString().trim();
+    if(dre){let a=regAccD[dre][i]; if(!a){a=blankAcc();regAccD[dre][i]=a;} accumulate(a,r,oid,dstr);}
+    if(hasRevenue){const rv=parseFloat(r[COL_REV]); if(oid&&!isNaN(rv)){const k=cu+'|'+i,e=custRev[k]||(custRev[k]={tri:0,oRev:0}); e.tri+=rv; e.oRev++; periodRevTotal[i]+=rv;}}
+  });
+
+  function accumulate(a,r,oid,dstr){
+    if(oid){ if(hasRevenue){const rv=parseFloat(r[COL_REV]);if(!isNaN(rv)){a.tri+=rv;a.oRev++;} const ct=parseFloat(r[COL_COST]);if(!isNaN(ct)){a.trc+=ct;a.oCost++;} if(!isNaN(rv)&&!isNaN(ct)){a.triB+=rv;a.trcB+=ct;a.nB++;}} a.os.add(oid);}
+    if(dstr)a.ds.add(dstr);
+    const wv=parseFloat(r['重量(lb)']);if(!isNaN(wv)){a.tw+=wv;a.nw++;}
+    const vv=parseFloat(r['体积(m³)']);if(!isNaN(vv)){a.tv+=vv;a.nv++;}
+    const zv=parseFloat(r['GF_ZONE_FEDEX']);if(!isNaN(zv)){a.tz+=zv;a.nz++;}
+    const cross=(r['是否跨区注入']||'').toString().trim();
+    if(oid){if(cross==='是'){a.cs.add(oid);if(dstr)a.cds.add(dstr);}else if(cross==='否'){a.ls.add(oid);if(dstr)a.lds.add(dstr);}}
+  }
+  function metricFromAcc(a){ if(!a)return null; const aw=a.nw?a.tw/a.nw:null,av=a.nv?a.tv/a.nv:null,az=a.nz?a.tz/a.nz:null;
+    const ac=a.cds.size?a.cs.size/a.cds.size:null, al=a.lds.size?a.ls.size/a.lds.size:null;
+    const cr=(a.cs.size||a.ls.size)?a.cs.size/(a.cs.size+a.ls.size)*100:null; // 订单数口径：跨区去重订单÷(跨区+本区去重订单)，避免跨区/本区出现天数不同导致比率失真
+    const pr=a.oRev?a.tri/a.oRev:null, pc=a.oCost?a.trc/a.oCost:null;
+    const pg=a.nB?(a.triB-a.trcB)/a.nB:null;
+    const gm=a.triB?(a.triB-a.trcB)/a.triB*100:null;
+    const ccr=a.tri?a.trc/a.tri*100:null;
+    return {aw:aw,av:av,az:az,cr:cr,pr:pr,pc:pc,pg:pg,gm:gm,ccr:ccr}; }
+
+  const avg=function(o){return o.d.size?o.wb.size/o.d.size:0;};
+  function countMatrix(st,cats){
+    const cell=cats.map(function(c){return pl.map(function(p,i){const e=st.cell[c+'|'+i];return e&&e.wb.size?avg(e):null;});});
+    const col=pl.map(function(p,i){const c=st.col[i];return c&&c.wb.size?avg(c):null;});
+    const row=cats.map(function(c){const r=st.row[c];return r&&r.wb.size?avg(r):null;});
+    const grand=st.gwb.size?st.gwb.size/Math.max(st.gd.size,1):0;
+    return {cats:cats,cols:plL,cell:cell,col:col,row:row,grand:grand};
+  }
+  // 结构占比矩阵：cell = 该分类该周期运单 ÷ 当周期总运单 × 100（%）。
+  // 合计列置 null（结构占比列合计恒=100%，无额外信息，且避免角标误算环比），
+  // 行合计/总计仍显示各分类跨周期平均占比。
+  function shareMatrix(st,cats){
+    const cell=cats.map(function(c){return pl.map(function(p,i){
+      const e=st.cell[c+'|'+i], tot=st.col[i];
+      if(e&&e.wb.size&&tot&&tot.wb.size) return +(e.wb.size/tot.wb.size*100).toFixed(1);
+      return null;});});
+    const col=pl.map(function(){return null;});
+    const row=cats.map(function(c,i){let s=0,n=0;for(let j=0;j<pl.length;j++)if(cell[i][j]!=null){s+=cell[i][j];n++;}return n?s/n:null;});
+    let s=0,n=0;cell.forEach(function(rr){rr.forEach(function(v){if(v!=null){s+=v;n++;}});});const grand=n?s/n:null;
+    return {cats:cats,cols:plL,cell:cell,col:col,row:row,grand:grand};
+  }
+
+  const custTot={};Object.keys(stores.cust.row).forEach(function(k){custTot[k]=stores.cust.row[k].wb.size;});
+  const topCust=Object.keys(custTot).sort(function(a,b){return custTot[b]-custTot[a];}).slice(0,10);
+  const wsegTot={};Object.keys(stores.wseg.row).forEach(function(k){wsegTot[k]=stores.wseg.row[k].wb.size;});
+  const wsegCats=Object.keys(wsegTot).sort(function(a,b){return wsegTot[b]-wsegTot[a];}).slice(0,8).sort(weightSegSort);
+  const cargoCats=['OS','AHS-W','AHS-H','普货'].filter(function(c){return stores.cargo.row[c];});
+
+  const hmRegion=countMatrix(stores.region,REGS);
+  const hmCust=countMatrix(stores.cust,topCust);
+  const hmWseg=countMatrix(stores.wseg,wsegCats);
+  const hmCargo=countMatrix(stores.cargo,cargoCats);
+  const hmCargoShare=shareMatrix(stores.cargo,cargoCats);
+
+  function valMatrix(field,dec){
+    return REGS.map(function(rg){return pl.map(function(p,i){const m=metricFromAcc(regAcc[rg][i]);return (m&&m[field]!=null)?+m[field].toFixed(dec):null;});});
+  }
+  function valMatrixD(field,dec){
+    return REGS_D.map(function(rg){return pl.map(function(p,i){const m=metricFromAcc(regAccD[rg][i]);return (m&&m[field]!=null)?+m[field].toFixed(dec):null;});});
+  }
+  function valAggCats(cats,m){
+    const col=pl.map(function(p,j){let s=0,n=0;for(let i=0;i<cats.length;i++)if(m[i][j]!=null){s+=m[i][j];n++;}return n?s/n:null;});
+    const row=cats.map(function(cc,i){let s=0,n=0;for(let j=0;j<pl.length;j++)if(m[i][j]!=null){s+=m[i][j];n++;}return n?s/n:null;});
+    let s=0,n=0;m.forEach(function(rr){rr.forEach(function(v){if(v!=null){s+=v;n++;}});});const grand=n?s/n:null;
+    return {cats:cats,cols:plL,cell:m,col:col,row:row,grand:grand};
+  }
+  const regVal={aw:valMatrix('aw',2),av:valMatrix('av',4),az:valMatrix('az',2),cr:valMatrix('cr',1),pr:valMatrix('pr',2),pc:valMatrix('pc',2),pg:valMatrix('pg',2),gm:valMatrix('gm',1),ccr:valMatrix('ccr',2)};
+  const hmWeight=valAggCats(REGS,regVal.aw),hmVol=valAggCats(REGS,regVal.av),hmZone=valAggCats(REGS,regVal.az),
+        hmCross=valAggCats(REGS,regVal.cr),hmRev=valAggCats(REGS,regVal.pr),hmCost=valAggCats(REGS,regVal.pc),
+        hmPg=valAggCats(REGS,regVal.pg),hmGmRate=valAggCats(REGS,regVal.gm),hmCostRatio=valAggCats(REGS,regVal.ccr);
+  // 目的大区版经营矩阵（模块四改用）：聚合口径与发件大区完全一致，仅分组键换成 r['目的大区']
+  const regValD={aw:valMatrixD('aw',2),av:valMatrixD('av',4),az:valMatrixD('az',2),cr:valMatrixD('cr',1),pr:valMatrixD('pr',2),pc:valMatrixD('pc',2),pg:valMatrixD('pg',2),gm:valMatrixD('gm',1),ccr:valMatrixD('ccr',2)};
+  const hmWeightD=valAggCats(REGS_D,regValD.aw),hmVolD=valAggCats(REGS_D,regValD.av),hmZoneD=valAggCats(REGS_D,regValD.az),
+        hmCrossD=valAggCats(REGS_D,regValD.cr),hmRevD=valAggCats(REGS_D,regValD.pr),hmCostD=valAggCats(REGS_D,regValD.pc),
+        hmPgD=valAggCats(REGS_D,regValD.pg),hmGmRateD=valAggCats(REGS_D,regValD.gm),hmCostRatioD=valAggCats(REGS_D,regValD.ccr);
+
+  const custRevM=topCust.map(function(cu){return pl.map(function(p,i){const e=custRev[cu+'|'+i];return (e&&e.oRev)?+(e.tri/e.oRev).toFixed(2):null;});});
+  const custShareM=topCust.map(function(cu){return pl.map(function(p,i){const tot=periodRevTotal[i],e=custRev[cu+'|'+i];return (tot&&e)?+(e.tri/tot*100).toFixed(1):null;});});
+  const hmCustRev=valAggCats(topCust,custRevM);
+  const hmCustShare=valAggCats(topCust,custShareM);
+
+  _meetAgg={plL:plL,hmRegion:hmRegion,hmCust:hmCust,hmWseg:hmWseg,hmCargo:hmCargo,hmCargoShare:hmCargoShare,
+    hmWeight:hmWeight,hmVol:hmVol,hmZone:hmZone,hmCross:hmCross,hmRev:hmRev,hmCost:hmCost,hmPg:hmPg,hmGmRate:hmGmRate,hmCostRatio:hmCostRatio,
+    hmWeightD:hmWeightD,hmVolD:hmVolD,hmZoneD:hmZoneD,hmCrossD:hmCrossD,hmRevD:hmRevD,hmCostD:hmCostD,hmPgD:hmPgD,hmGmRateD:hmGmRateD,hmCostRatioD:hmCostRatioD,
+    hmCustRev:hmCustRev,hmCustShare:hmCustShare};
+  _meetRef=filteredData;
+  return _meetAgg;
+}
+function renderMeeting(){
+  const A=computeMeetingAgg(); if(!A)return;
+  renderScopeKpis();
+  // 模块一：单量趋势（计数热力图，含占比子标签）
+  drawHM('hmRegion','hmRegionWow',A.hmRegion,{count:true,corner:'发件大区＼周期',fmt:function(v){return v.toFixed(1);},wow:'日均单量(单/天)'});
+  drawHM('hmCust','hmCustWow',A.hmCust,{count:true,corner:'客户＼周期',fmt:function(v){return v.toFixed(1);},wow:'日均单量(单/天)'});
+  drawHM('hmWseg','hmWsegWow',A.hmWseg,{count:true,corner:'重量段＼周期',fmt:function(v){return v.toFixed(1);},wow:'日均单量(单/天)'});
+  drawHM('hmCargo','hmCargoWow',A.hmCargoShare,{count:false,corner:'货型＼周期',fmt:function(v){return v.toFixed(1)+'%';},wow:'占比总单量(%)'});
+  // 模块二：重量体积（按发件大区，颜色编码数值大小）
+  drawHM('hmWeight','hmWeightWow',A.hmWeight,{count:false,corner:'发件大区＼周期',fmt:function(v){return v.toFixed(2);},wow:'平均重量(lb)'});
+  drawHM('hmVol','hmVolWow',A.hmVol,{count:false,corner:'发件大区＼周期',fmt:function(v){return v.toFixed(4);},wow:'平均体积(m³)'});
+  // 模块三：流向（按发件大区）
+  drawHM('hmZone','hmZoneWow',A.hmZone,{count:false,corner:'发件大区＼周期',fmt:function(v){return v.toFixed(2);},wow:'平均ZONE'});
+  drawHM('hmCross','hmCrossWow',A.hmCross,{count:false,corner:'发件大区＼周期',fmt:function(v){return v.toFixed(1);},wow:'跨区比例(%)'});
+}
+/* 经营分析 TAB：收入/成本相关图表（单票收入、单票派送成本、单票A毛利、A毛利率、成本占比收入、客户单均/收入占比、客户×重量段票均收入） */
+function renderBusiness(){
+  const A=computeMeetingAgg(); if(!A)return;
+  renderScopeKpis();
+  if(!hasRevenue)return;   // 无收入数据源时这些图表无意义
+  // ① 始发大区 × 周期 票均价格（四级钻取：始发大区 → 始发HUB → 目的HUB → 目的站点）
+  drawRegionDestPeriod();
+  // ② 目的大区 × 周期 单票收入 / 派送成本 / A毛利（三级钻取：目的大区 → 目的HUB → 目的站点）
+  drawDestDrill('hmRev','rev');
+  drawDestDrill('hmCost','cost');
+  drawDestDrill('hmPg','pg');
+  // ③ A毛利率 & 成本占比收入（目的大区折线趋势）
+  drawLineMatrix('chartGmRate','hmGmRateWow',A.hmGmRateD,'%',true);
+  drawLineMatrix('chartCostRatio','hmCostRatioWow',A.hmCostRatioD,'%',true);
+  // ④ 客户单均收入 / 收入占比（前10）
+  drawHM('hmCustRev','hmCustRevWow',A.hmCustRev,{count:false,corner:'客户＼周期',fmt:function(v){return v.toFixed(2);},wow:'单均收入($)'});
+  drawHM('hmCustShare','hmCustShareWow',A.hmCustShare,{count:false,corner:'客户＼周期',fmt:function(v){return v.toFixed(1);},wow:'收入占比(%)'});
+  // ⑤ 发单量前十客户 × 重量段 票均收入热力图
+  drawCustWeightHeatmap(filteredData,10);
+}
+function switchTab(name){
+  document.querySelectorAll('.tab-panel').forEach(function(p){p.style.display='none'});
+  const el=document.getElementById('panel-'+name); if(el)el.style.display='block';
+  document.querySelectorAll('.tab-btn').forEach(function(b){b.classList.toggle('active',b.dataset.tab===name)});
+  if(name==='meeting')renderMeeting();
+  if(name==='business')renderBusiness();
+}
+function refreshAll(){updCh();upd();if(document.getElementById('panel-meeting').style.display!=='none')renderMeeting();if(document.getElementById('panel-business').style.display!=='none')renderBusiness()}
+
+function updCh(){
+  const pl=getPeriods(filteredData);
+  const plL=pl.map(pLabel);            // X 轴标签统一带年度（26W33 / 2026-03 / 2026-09-22）
+  // 一次遍历按周期分桶，替代「每个周期 filter 一次全量数据」（原 O(N×周期数)）
+  const pidx={};pl.forEach(function(p,i){pidx[p]=i});
+  const buckets=pl.map(function(){return []});
+  filteredData.forEach(function(r){const i=pidx[periodOf(r)];if(i!==undefined)buckets[i].push(r)});
+  const wm={};pl.forEach(function(p,i){wm[p]=calc(buckets[i],true)});
+  chart('chartOrderTrend',plL,pl.map(p=>wm[p]?.ao||0),'日均单量','#e67e22');
+  // 各周期 A-D 时长趋势：拆分为 总计 / 跨区注入 / 本区揽派 三条折线
+  chartMulti('chartDeliveryTrend',plL,[
+    {label:'总计',data:pl.map(p=>wm[p]?wm[p].ad:0),color:'#333333',lastIdx:plL.length-1},
+    {label:'跨区注入',data:pl.map(p=>wm[p]?wm[p].adc:0),color:'#e67e22',lastIdx:plL.length-1},
+    {label:'本区揽派',data:pl.map(p=>wm[p]?wm[p].adl:0),color:'#1f6feb',lastIdx:plL.length-1}
+  ],true);
+  chart('chartWeightTrend',plL,pl.map(p=>wm[p]?.aw||0),'平均重量(lb)','#e67e22');
+  chart('chartVolumeTrend',plL,pl.map(p=>wm[p]?.av||0),'平均体积(m³)','#e67e22');
+  // 超尺寸结构占比趋势（OS / AHS-W / AHS-H / 普货），按当周期票数口径占比(%)
+  chartMulti('chartOversizeTrend',plL,[
+    {label:'OS',data:pl.map(p=>ovShare(wm[p],'OS')),color:'#e74c3c'},
+    {label:'AHS-W',data:pl.map(p=>ovShare(wm[p],'AHS-W')),color:'#e67e22'},
+    {label:'AHS-H',data:pl.map(p=>ovShare(wm[p],'AHS-H')),color:'#16a085'},
+    {label:'普货',data:pl.map(p=>ovShare(wm[p],'普货')),color:'#95a5a6'}
+  ],true,false);
+  drawCustomer();
+  if(hasRevenue){
+    chartMulti('chartRevTrend',plL,[
+      {label:'单票收入($)',data:pl.map(p=>wm[p]?wm[p].pr:0),color:'#1f6feb'},
+      {label:'单票派送成本($)',data:pl.map(p=>wm[p]?wm[p].pc:0),color:'#e67e22'},
+      {label:'单票A毛利($)',data:pl.map(p=>wm[p]?wm[p].pg:0),color:'#2e7d32'}
+    ],true);
+    chart('chartGmTrend',plL,pl.map(p=>wm[p]?wm[p].gm:0),'A毛利率(%)','#1f6feb');
+    // 票均收入两张图：Y 轴不强制从 0 开始（各线集中在 13~20，从 0 起曲线被压平看不出差异）
+    // 两张图均逐点标注数值（字号 8 减轻密集感；点数>50 时 chartMulti 自动退化为只标尾点）
+    const oa=regionRevAgg('发件大区',true); chartMulti('chartRevByOrigin',oa.pl.map(pLabel),oa.series,true,false,8);
+    // 目的大区：每个数据点都标注数值（字号 8 减轻密集感）
+    const da=regionRevAgg('目的大区',true); chartMulti('chartRevByDest',da.pl.map(pLabel),da.series,true,false,8);
+  }else{
+    clearChart('chartRevTrend');clearChart('chartGmTrend');clearChart('chartRevByOrigin');clearChart('chartRevByDest');
+  }
+  drawStructure();
+  drawDriver();
+  drawAdp95Period();
+  if(hasRevenue)drawRevCustomer();else{clearChart('chartRevCustomer');clearChart('chartRevPerCustomer')}
+}
+
+/* ===== 单指标折线图（每个数据点都标注数值） ===== */
+function chart(id,labels,data,label,color){
+  if(chartInstances[id])chartInstances[id].destroy();
+  const cv=document.getElementById(id);if(!cv)return;
+  const ctx=cv.getContext('2d');
+  const isVolume=label.indexOf('体积')>=0;
+  const maxVal=Math.max.apply(null,[0].concat(data));
+  // 点数过多时（日维度可达 250+ 天）逐点标注会重叠成黑块：改为只标注最后一个点
+  const dense=labels.length>50;
+  chartInstances[id]=new Chart(ctx,{type:'line',data:{labels,datasets:[{label,data,backgroundColor:color+'20',borderColor:color,borderWidth:2,fill:false,tension:0.3,pointBackgroundColor:color,pointRadius:4,pointHoverRadius:6}]},
+    options:{responsive:true,maintainAspectRatio:false,
+      layout:{padding:{top:28,right:20,bottom:6,left:6}},
+      plugins:{legend:{display:false},
+        datalabels:{display:function(c){return dense?(c.dataIndex===labels.length-1):true},anchor:'end',align:'end',clamp:true,color:'#333',font:{weight:'bold',size:10},formatter:function(v){return typeof v==='number'?(isVolume?v.toFixed(4):(v>=100?v.toFixed(0):v.toFixed(1))):v}}},
+      scales:{y:{beginAtZero:true,grid:{color:'#f0f0f0'},suggestedMax:maxVal*1.25||1},x:{grid:{display:false},ticks:{maxRotation:0,autoSkip:true,autoSkipPadding:6}}}}})
+}
+
+/* ===== 单指标横向柱状图（带数据标签） ===== */
+function chartH(id,labels,data,label,color,fmt){
+  if(chartInstances[id])chartInstances[id].destroy();
+  const cv=document.getElementById(id);if(!cv)return;
+  const ctx=cv.getContext('2d');
+  const maxVal=Math.max.apply(null,[0].concat(data));
+  chartInstances[id]=new Chart(ctx,{type:'bar',data:{labels,datasets:[{label,data,backgroundColor:color+'99',borderColor:color,borderWidth:1,borderRadius:4}]},
+    options:{responsive:true,maintainAspectRatio:false,indexAxis:'y',
+      layout:{padding:{top:4,right:26,bottom:4,left:4}},
+      plugins:{legend:{display:false},
+        datalabels:{anchor:'end',align:'end',clamp:true,color:'#333',font:{weight:'bold',size:10},formatter:function(v,ctx){return typeof v==='number'?((fmt)?fmt(v,ctx):((v>=100)?v.toFixed(0):v.toFixed(1))):v}}},
+      scales:{y:{grid:{display:false}},x:{beginAtZero:true,grid:{color:'#f0f0f0'},suggestedMax:maxVal*1.12,ticks:{maxRotation:0,autoSkip:true,autoSkipPadding:8}}}}})
+}
+
+/* 多系列折线（收入/成本/A毛利/客户趋势等）
+   - showLabels=false 关闭数据标签；series[i].dl=false 可单独关闭某条线的标签
+   - series[i].lastIdx 指定只在该点显示标签（避免多点密集重叠）
+   - zeroBased=false 时 Y 轴不强制从 0 开始（占比类指标用）
+   - labelSize 可单独指定标签字号（全点标注时用小字号减轻密集感）
+   注：lastIdx 用 ==null 判断，同时兼容 undefined 与 null（Chart.js 会把缺失的自定义属性归一化为 null） */
+function chartMulti(id,labels,series,showLabels,zeroBased,labelSize){
+  if(chartInstances[id])chartInstances[id].destroy();
+  const cv=document.getElementById(id);
+  if(!cv)return;
+  const ctx=cv.getContext('2d');
+  if(!labels.length){ctx.clearRect(0,0,cv.width,cv.height);return}
+  // 同上：点数过多时对未指定 lastIdx 的线也只标注尾点，避免逐点标注重叠
+  const dense=labels.length>50;
+  chartInstances[id]=new Chart(ctx,{type:'line',
+    data:{labels:labels,datasets:series.map(function(s){return {label:s.label,data:s.data,lastIdx:s.lastIdx,dl:s.dl,borderColor:s.color,backgroundColor:s.color+'20',borderWidth:s.borderWidth||2,fill:false,tension:0.3,pointBackgroundColor:s.color,pointRadius:3,pointHoverRadius:5}})},
+    options:{responsive:true,maintainAspectRatio:false,
+      layout:{padding:{top:24,right:16,bottom:6,left:6}},
+      interaction:{mode:'index',intersect:false},
+      plugins:{legend:{display:true,position:'top',labels:{font:{size:11},boxWidth:14,boxHeight:12}},
+        datalabels:{display:function(ctx){if(!showLabels)return false;const ds=ctx.dataset;if(ds.dl===false)return false;if(ds.lastIdx==null)return dense?(ctx.dataIndex===labels.length-1):true;return ctx.dataIndex===ds.lastIdx;},anchor:'end',align:'end',clamp:true,color:function(ctx){return ctx.dataset.borderColor||'#333'},font:{weight:'bold',size:labelSize||10},formatter:function(v){return typeof v==='number'?v.toFixed(1):v}}},
+      scales:{y:{beginAtZero:zeroBased!==false,grid:{color:'#f0f0f0'}},x:{grid:{display:false},ticks:{maxRotation:0,autoSkip:true,autoSkipPadding:6}}}}
+  });
+}
+/* 超尺寸各类别占当周期比例(%)，分母 = 已分类运单数（缺失尺寸字段行归普货，会拉高普货占比）
+   注意：calc() 里 wm.ov 的键是 OS/AHSW/AHSH/plain，而调用方传的是展示名，需映射后再取。 */
+const OV_KEY={'OS':'OS','AHS-W':'AHSW','AHS-H':'AHSH','普货':'plain'};
+function ovShare(wm,cat){if(!wm||!wm.ov||!wm.ov.total)return 0;const v=wm.ov[OV_KEY[cat]||cat]||0;return +(v/wm.ov.total*100).toFixed(2)}
+/* 按大区维度聚合票均收入（周期×大区 网格）；每大区一条折线，X=周期，Y=票均收入
+   - 无该周期数据 → null（折线断开），避免误显示为「票均收入 = 0」
+   - 全周期均无数据的分组（如脏值 Ground）不进入图表
+   - 「未知」分组（大区字段为空）不做展示 */
+const REGION_COLORS=['#1f6feb','#e67e22','#2e7d32','#c0392b','#8e44ad','#16a085','#d35400','#2980b9','#f39c12','#7f8c8d'];
+/* fullLabels=true 时不设置 lastIdx —— 即每个数据点都标注数值 */
+function regionRevAgg(dimField,fullLabels){
+  const pl=getPeriods(filteredData);
+  const grid={},regSet=new Set();
+  filteredData.forEach(function(r){
+    let reg=(r[dimField]||'').toString().trim(); if(!reg)reg='未知';
+    const p=periodOf(r); if(!p)return;
+    const rev=parseFloat(r[COL_REV]); if(isNaN(rev))return;
+    const k=reg+'|'+p, e=grid[k]||(grid[k]={rev:0,oids:new Set()});
+    e.rev+=rev; if(r._oid)e.oids.add(r._oid);
+    regSet.add(reg);
+  });
+  const regs=[...regSet].sort(regionSort);
+  const series=regs.map(function(reg,i){
+    return {label:reg,color:REGION_COLORS[i%REGION_COLORS.length],
+      data:pl.map(function(p){const e=grid[reg+'|'+p];return (e&&e.oids.size)?+(e.rev/e.oids.size).toFixed(2):null})};
+  }).filter(function(s){return s.label!=='未知' && s.data.some(function(v){return v!==null})});
+  // 尾点数据标签：仅每大区最后一周期显示，避免 38 点全程标注造成重叠
+  if(!fullLabels)series.forEach(function(s){s.lastIdx=lastIdxOf(s.data)});
+  return {pl:pl,series:series};
+}
+/* ===== 客户单量 TOP10（右侧面板）=====
+   口径：单周期勾选 → 该周期客户单量（与指标卡 / 两张热力图同口径）；
+        未勾选 / 多选 → 全周期累计（与上方趋势图及其他图表一致）。 */
+function drawCustomerTop(scopedData){
+  const set=selectedPeriodSet(),single=(set.size===1);
+  const d=single?scopedData:filteredData;   // 单周期复用 upd() 已经算好的数据，避免重复全量扫描
+  const m={};
+  d.forEach(function(r){
+    if(!r._oid)return;
+    const c=(r['客户简称']||'').toString().trim()||'未标注客户';
+    m[c]=(m[c]||0)+1;
+  });
+  const top=Object.entries(m).sort(function(a,b){return b[1]-a[1]}).slice(0,10);
+  const sc=document.getElementById('custTopScope');
+  if(sc){
+    sc.className='hm-wow flat';
+    sc.textContent=single?((viewMode==='week'?'周 ':(viewMode==='day'?'日 ':'月 '))+pLabel([...set][0])+' 单量'):'全周期累计（与趋势图一致）';
+  }
+  if(!top.length){clearChart('chartCustomerTop');return}
+  chartH('chartCustomerTop',top.map(function(e){return e[0]}),top.map(function(e){return e[1]}),'单量','#e67e22',
+    function(v){return v.toLocaleString('en-US')});
+}
+
+/* ===== 客户维度：TOP5 + 其他客户 日均单量趋势 / TOP5 占全量订单比例趋势 =====
+   口径说明：
+   - 日均单量 = 该客户当周期运单去重数 ÷ 当周期天数去重。分母统一取「该周期全量天数」，
+     因此 6 条线可直接加总 = 总体日均单量（若改用客户自身活跃天数则不可加总）；
+   - 数据源一行一票且运单号唯一（已校验），故按行计数，无需为每个格子建 Set；
+   - 客户名为空并入「其他客户」，保证 TOP5 + 其他 = 全量。 */
+const TOPN=5;
+const CUST_COLORS=['#1f6feb','#e67e22','#2e7d32','#c0392b','#8e44ad'];
+/* 折线尾点下标（最后一个非空值），用于只在该点显示数据标签，避免全程密集标注 */
+function lastIdxOf(arr){for(let i=arr.length-1;i>=0;i--){if(arr[i]!=null)return i}return arr.length-1}
+function customerSeries(){
+  const pl=getPeriods(filteredData);
+  const pi={};pl.forEach(function(p,i){pi[p]=i});
+  const P=pl.length,days=[],totN=[];
+  for(let i=0;i<P;i++){days.push(new Set());totN.push(0)}
+  const cell={},cu={};
+  filteredData.forEach(function(r){
+    const i=pi[periodOf(r)];if(i===undefined)return;
+    if(r._dateStr)days[i].add(r._dateStr);
+    if(!r._oid)return;
+    totN[i]++;                                     // 全量订单数（含客户名为空的行）
+    const c=(r['客户简称']||'').toString().trim();
+    if(!c)return;                                  // 空客户名：计入全量，不参与 TOP 排名
+    const k=c+'|'+i;cell[k]=(cell[k]||0)+1;
+    cu[c]=(cu[c]||0)+1;
+  });
+  const top5=Object.keys(cu).sort(function(a,b){return cu[b]-cu[a]}).slice(0,TOPN);
+  const sumTop=function(j){let s=0;for(let i=0;i<top5.length;i++)s+=(cell[top5[i]+'|'+j]||0);return s};
+  const series=top5.map(function(c,i){
+    return {label:c,color:CUST_COLORS[i%CUST_COLORS.length],
+      data:pl.map(function(p,j){const d=days[j].size;return d?+((cell[c+'|'+j]||0)/d).toFixed(1):0})};
+  });
+  series.push({label:'其他客户',color:'#9e9e9e',
+    data:pl.map(function(p,j){const d=days[j].size;return d?+((totN[j]-sumTop(j))/d).toFixed(1):0})});
+  series.forEach(function(s){s.lastIdx=lastIdxOf(s.data)});
+  const share=pl.map(function(p,j){return totN[j]?+(sumTop(j)/totN[j]*100).toFixed(1):0});
+  const perShare=top5.map(function(c,i){
+    return {label:c+'占比',color:CUST_COLORS[i%CUST_COLORS.length],
+      data:pl.map(function(p,j){return totN[j]?+((cell[c+'|'+j]||0)/totN[j]*100).toFixed(1):0})};
+  });
+  return {pl:pl,series:series,share:share,perShare:perShare,top5:top5};
+}
+function drawCustomer(){
+  const we=document.getElementById('custShareWow'),wc=document.getElementById('custWow');
+  const a=customerSeries();
+  if(!a.pl.length){clearChart('chartCustomer');clearChart('chartCustomerShare');
+    if(we){we.className='hm-wow';we.textContent=''}if(wc){wc.className='hm-wow';wc.textContent=''}return}
+  const plL=a.pl.map(pLabel);
+  chartMulti('chartCustomer',plL,a.series,true);
+  // 每个数据点都标注数值（合计线加粗区分；字号 8 减轻密集感），Y 轴不强制从 0 开始
+  const ss=[{label:'TOP'+a.top5.length+' 合计',color:'#111827',borderWidth:3,data:a.share}].concat(a.perShare);
+  chartMulti('chartCustomerShare',plL,ss,true,false,8);
+  const n=a.pl.length;
+  if(we&&n){
+    if(n>1&&a.share[n-2]){const f=fmtC(a.share[n-1],a.share[n-2],1);we.textContent='最新 '+a.share[n-1].toFixed(1)+'%　'+f.rate;we.className='hm-wow '+f.c}
+    else{we.textContent='最新 '+a.share[n-1].toFixed(1)+'%';we.className='hm-wow flat'}
+  }
+  if(wc&&n){
+    let s=0;for(let i=0;i<a.top5.length;i++)s+=a.series[i].data[n-1];
+    wc.textContent='TOP'+a.top5.length+' 最新合计 '+s.toFixed(0)+' 单/天';wc.className='hm-wow flat';
+  }
+}
+
+/* 清空画布（数据源无该维度时使用） */
+function clearChart(id){
+  if(chartInstances[id]){chartInstances[id].destroy();chartInstances[id]=null}
+  const cv=document.getElementById(id);
+  if(cv){const ctx=cv.getContext('2d');ctx.clearRect(0,0,cv.width,cv.height)}
+}
+
+/* ===== 分类×周次 结构占比热力图（行=分类 / 列=周次，每格含占比/绝对值/周环比） ===== */
+function weightSegSort(a,b){const na=(a.match(/\d+/)||[9999])[0]|0, nb=(b.match(/\d+/)||[9999])[0]|0;return na-nb}
+function zoneSort(a,b){const na=(a==='未知')?1e9:(parseFloat(a)||1e9), nb=(b==='未知')?1e9:(parseFloat(b)||1e9);return na-nb}
+function drawCategoryHeatmap(containerId, wowId, catField, sortFn, skipEmpty){
+  const container=document.getElementById(containerId);
+  if(!container)return;
+  container.innerHTML='';
+  const data=filteredData;
+  if(!data.length){container.innerHTML='<div class="hm-nodata">暂无数据</div>';const we=document.getElementById(wowId);if(we){we.className='hm-wow';we.textContent=''}return;}
+  const m={},wkTot={},catTot={},catSet=new Set(),periodSet=new Set();
+  data.forEach(function(r){
+    let c=(r[catField]||'').toString().trim();
+    if(skipEmpty&&!c)return;
+    if(!c)c='未知';
+    const w=periodOf(r); if(!w)return;
+    catSet.add(c); periodSet.add(w);
+    let e=m[c+'|'+w]; if(!e){e=m[c+'|'+w]={wb:new Set(),day:new Set()};}
+    let wt=wkTot[w]; if(!wt){wt=wkTot[w]={wb:new Set(),day:new Set()};}
+    let ct=catTot[c]; if(!ct){ct=catTot[c]={wb:new Set(),day:new Set()};}
+    const oid=r._oid, dstr=r._dateStr;
+    if(oid){e.wb.add(oid);wt.wb.add(oid);ct.wb.add(oid);}
+    if(dstr){e.day.add(dstr);wt.day.add(dstr);ct.day.add(dstr);}
+  });
+  let weeks=[...periodSet].sort(periodSort);
+  // 日维度下周期数 = 天数（全量可达 250+ 天），列数过大会让表格极宽且无法阅读：
+  // 仅展示最近 30 天，并在角标处提示可切回周/月维度看完整时间轴
+  const DAY_HM_LIMIT=30;
+  let hmTruncated=false;
+  const periodTotal=weeks.length;
+  if(viewMode==='day'&&weeks.length>DAY_HM_LIMIT){weeks=weeks.slice(-DAY_HM_LIMIT);hmTruncated=true;}
+  // 截断时「合计」列必须只统计可见周期，否则会与可见的 30 天列口径不一致（全量 vs 30 天）
+  let catTotVis=null,totOrdersVis=0;
+  if(hmTruncated){
+    const vis=new Set(weeks);
+    catTotVis={};
+    data.forEach(function(r){
+      let c=(r[catField]||'').toString().trim();
+      if(skipEmpty&&!c)return;
+      if(!c)c='未知';
+      const w=periodOf(r); if(!vis.has(w))return;
+      const e=m[c+'|'+w]; if(!e)return;
+      let t=catTotVis[c]; if(!t)t=catTotVis[c]={oid:new Set(),day:new Set()};
+      if(r._oid)t.oid.add(r._oid);
+      if(r._dateStr)t.day.add(r._dateStr);
+    });
+    totOrdersVis=Object.keys(catTotVis).reduce(function(s,k){return s+catTotVis[k].oid.size;},0);
+  }
+  let cats=[...catSet]; if(sortFn)cats.sort(sortFn); else cats.sort();
+  const avg=function(o){return o.day.size?o.wb.size/o.day.size:0};
+  // 色阶基准：单元格占比最大值，单位必须与渲染时传入的 share 一致（都是百分数 %）
+  let maxShare=0;
+  cats.forEach(function(c){weeks.forEach(function(w){const e=m[c+'|'+w];if(e&&e.wb.size){const sh=wkTot[w].wb.size?e.wb.size/wkTot[w].wb.size*100:0;if(sh>maxShare)maxShare=sh;}})});
+  // 同样用 sqrt 拉伸低占比区间（结构性占比也高度右偏），否则小占比格子几乎全白
+  const colorFor=function(v){const t=Math.min(1,Math.sqrt(Math.max(0,maxShare>0?v/maxShare:0)));const c=hmColor(t);return{bg:c.bg,dark:c.dark}};
+  const fmtN=function(v){return (v||0).toFixed(1)};
+  const totOrders=Object.keys(catTot).reduce(function(s,k){return s+catTot[k].wb.size;},0);
+  const grandDays=Object.keys(wkTot).reduce(function(s,k){return s+wkTot[k].day.size;},0);
+  const grandWb=Object.keys(wkTot).reduce(function(s,k){return s+wkTot[k].wb.size;},0);
+  const grandAvg=grandDays?grandWb/grandDays:0;
+  const cols=weeks.length+2;
+  let html='<div class="hm-wrap"><table id="'+containerId+'T" class="hm-table" style="--cols:'+cols+'"><colgroup>';
+  for(let i=0;i<cols;i++)html+='<col style="width:'+(100/cols)+'%">';
+  const axisName=viewMode==='day'?'日期':(viewMode==='week'?'周次':'月份');
+  html+='</colgroup><thead><tr><th class="corner">'+catField+'＼'+axisName+(hmTruncated?'(最近'+DAY_HM_LIMIT+'天)':'')+'</th>';
+  weeks.forEach(function(w){html+='<th>'+pLabel(w)+'</th>'});
+  html+='<th class="total">'+(hmTruncated?('最近'+DAY_HM_LIMIT+'天合计'):'全周期合计')+'</th></tr></thead><tbody>';
+  cats.forEach(function(c){
+    html+='<tr><td class="row-head">'+c+'</td>';
+    weeks.forEach(function(w,wi){
+      const e=m[c+'|'+w];
+      if(!e||!e.wb.size){html+='<td class="cell empty">—</td>';return;}
+      const a=avg(e);
+      // 占比统一用「订单口径」：该分类当周期运单去重数 ÷ 当周期全部运单去重数
+      // （此前为日均口径 a/wkAvg，与「全周期合计」列的订单口径不一致，实测偏差≤0.18pp，现统一）
+      const share=wkTot[w].wb.size?e.wb.size/wkTot[w].wb.size*100:0;
+      let wowRate='',wowAbs='',wcls='flat';
+      if(wi>0){
+        const pe=m[c+'|'+weeks[wi-1]];
+        if(pe&&pe.wb.size){
+          const pw=wkTot[weeks[wi-1]];
+          const pa=avg(pe), pShare=pw.wb.size?pe.wb.size/pw.wb.size*100:0;
+          const dAbs=a-pa, rate=pShare>0?(share-pShare)/pShare*100:0;
+          wcls=rate>0?'up':(rate<0?'down':'flat');
+          wowRate=(rate>=0?'↑':'↓')+Math.abs(rate).toFixed(1)+'%';
+          wowAbs='Δ'+(dAbs>=0?'+':'')+dAbs.toFixed(1);
+        }
+      }
+      const cf=colorFor(share);
+      html+='<td class="cell" style="background:'+cf.bg+';color:'+(cf.dark?'#fff':'#3a1400')+'">'+fmtN(a)+
+        '<span class="sub">'+share.toFixed(1)+'%</span>'+
+        (wowRate?'<span class="cell-wow '+wcls+'">'+wowRate+'</span>':'')+
+        (wowAbs?'<span class="cell-wowabs '+wcls+'">'+wowAbs+'</span>':'')+'</td>';
+    });
+    let ca,cshare;
+    if(hmTruncated){const tv=catTotVis[c];ca=(tv&&tv.day.size)?tv.oid.size/tv.day.size:0;cshare=(totOrdersVis>0&&tv)?tv.oid.size/totOrdersVis*100:0;}
+    else{ca=avg(catTot[c]);cshare=totOrders>0?catTot[c].wb.size/totOrders*100:0;}
+    const ccf=colorFor(cshare);
+    html+='<td class="total" style="background:'+ccf.bg+';color:'+(ccf.dark?'#fff':'#3a1400')+'">'+fmtN(ca)+'<span class="sub">'+cshare.toFixed(1)+'%</span></td></tr>';
+  });
+  html+='<tr><td class="row-head total">'+(viewMode==='month'?'全月日均':(viewMode==='day'?'全期日均':'全周日均'))+'</td>';
+  weeks.forEach(function(w){html+='<td class="total">'+fmtN(avg(wkTot[w]))+'</td>'});
+  // 截断时最后一格也只统计可见周期（日维度各周期天数互不重叠，可直接相加）
+  let grandAvgV=grandAvg;
+  if(hmTruncated){let vwb=0,vday=0;weeks.forEach(function(w){const t=wkTot[w];if(t){vwb+=t.wb.size;vday+=t.day.size}});grandAvgV=vday?vwb/vday:0;}
+  html+='<td class="grand">'+fmtN(grandAvgV)+' 单/天</td></tr>';
+  html+='</tbody></table></div>';
+  container.innerHTML=html;
+  const we=document.getElementById(wowId);
+  if(we){we.className='hm-wow flat';we.textContent=hmTruncated?('日维度：共 '+periodTotal+' 天，仅展示最近 '+DAY_HM_LIMIT+' 天（切回周/月看完整时间轴）'):''}
+}
+
+/* ===== 跨区注入 vs 本区揽派 · 周度组合图 ===== */
+/* 跨区/本区：一次遍历分桶（原为每周期 filter 一次全量）
+   跨区率按「订单数口径」计算：跨区单量 ÷(跨区+本区)，避免两边天数不同导致比率失真 */
+function crossLocalWeekly(data){
+  const wl=getPeriods(data);
+  const pi={};wl.forEach(function(w,i){pi[w]=i});
+  const co=[],cd=[],lo=[],ld=[];
+  for(let i=0;i<wl.length;i++){co.push(new Set());cd.push(new Set());lo.push(new Set());ld.push(new Set())}
+  data.forEach(function(r){
+    const i=pi[periodOf(r)];if(i===undefined)return;
+    const cross2=(r['是否跨区注入']||'').toString().trim();
+    const o=r._oid,d=r._dateStr;
+    if(cross2==='是'){if(o)co[i].add(o);if(d)cd[i].add(d);}
+    else if(cross2==='否'){if(o)lo[i].add(o);if(d)ld[i].add(d);}
+  });
+  const cross=[],local=[],rate=[];
+  for(let i=0;i<wl.length;i++){
+    const c=cd[i].size?co[i].size/cd[i].size:0;
+    const l=ld[i].size?lo[i].size/ld[i].size:0;
+    cross.push(+c.toFixed(1));
+    local.push(+l.toFixed(1));
+    const tot=co[i].size+lo[i].size;
+    rate.push(tot>0?+(co[i].size/tot*100).toFixed(1):0);
+  }
+  return {wl,cross,local,rate};
+}
+function chartCombo(id,weeks,cross,local,rate){
+  if(chartInstances[id]){chartInstances[id].destroy();chartInstances[id]=null;}
+  const cv=document.getElementById(id);
+  if(!cv)return;
+  if(!weeks.length){const ctx=cv.getContext('2d');ctx.clearRect(0,0,cv.width,cv.height);return;}
+  const ctx=cv.getContext('2d');
+  chartInstances[id]=new Chart(ctx,{
+    data:{labels:weeks,datasets:[
+      {type:'bar',label:'跨区注入日均单量',data:cross,backgroundColor:'#e67e22cc',borderColor:'#e67e22',borderWidth:1,borderRadius:4,yAxisID:'y'},
+      {type:'bar',label:'本区揽派日均单量',data:local,backgroundColor:'#f0a868cc',borderColor:'#e67e22',borderWidth:1,borderRadius:4,yAxisID:'y'},
+      {type:'line',label:'跨区率(%)',data:rate,borderColor:'#1f6feb',backgroundColor:'#1f6feb',borderWidth:2.5,tension:0.3,pointRadius:4,pointHoverRadius:6,yAxisID:'y1',datalabels:{color:'#1f6feb',font:{weight:'bold',size:11},formatter:v=>v+'%'}}
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,
+      layout:{padding:{top:24,right:16,bottom:6,left:6}},
+      interaction:{mode:'index',intersect:false},
+      plugins:{legend:{display:true,position:'top',labels:{font:{size:12},boxWidth:14,boxHeight:12}},
+        datalabels:{anchor:'end',align:'end',clamp:true,color:'#333',font:{weight:'bold',size:10},formatter:function(v,ctx){return ctx.datasetIndex===2?v+'%':(+v).toFixed(1)}}},
+      scales:{
+        y:{position:'left',beginAtZero:true,title:{display:true,text:'日均单量(单/天)',font:{size:11}},grid:{color:'#f0f0f0'}},
+        x:{grid:{display:false},ticks:{maxRotation:0,autoSkip:true,autoSkipPadding:6}},
+        y1:{position:'right',beginAtZero:true,max:100,title:{display:true,text:'跨区率(%)',font:{size:11}},grid:{drawOnChartArea:false},ticks:{min:0,max:100}}
+      }
+    }
+  });
+}
+
+/* ===== 汇总绘制结构占比热力图 + 跨区组合图（跟随 filteredData 口径） ===== */
+function drawStructure(){
+  drawCategoryHeatmap('segHeatContainer','segWow','重量段',weightSegSort,false);
+  drawCategoryHeatmap('zoneHeatContainer','zoneWow','GF_ZONE_FEDEX',zoneSort,true);
+  const cl=crossLocalWeekly(filteredData);
+  chartCombo('chartCrossLocal',cl.wl.map(pLabel),cl.cross,cl.local,cl.rate);
+}
+
+/* ===== 司机人效 =====
+   ① 各领件站点日均单量 TOP15（按「快递员领件站点」聚合）
+   ② 始发HUB × 目的站点 组合的 A-D 时长均值（最慢 TOP15）
+      组合口径能定位到「哪条线路、哪一段」最慢，比单看站点更能指导整改。
+      为避免极小样本（1~3 单）拉出极端均值，只统计有效单量 >= DRIVER_MIN_N 的组合。 */
+const DRIVER_MIN_N=30;
+function drawDriver(){
+  const m={};
+  filteredData.forEach(function(r){
+    const s=(r['快递员领件站点']||'').toString().trim();
+    if(!s)return;
+    let e=m[s];if(!e){e=m[s]={wb:new Set(),day:new Set(),ad:0,adn:0};}
+    if(r._oid)e.wb.add(r._oid);
+    if(r._dateStr)e.day.add(r._dateStr);
+    const dd=parseFloat(r['妥投耗时(h)']);
+    if(dd&&!isNaN(dd)){e.ad+=dd;e.adn++;}
+  });
+  const arr=Object.entries(m).map(function(e){return [e[0], e[1].day.size?e[1].wb.size/e[1].day.size:0, e[1].adn?e[1].ad/e[1].adn:0];});
+  const qty=arr.slice().sort(function(a,b){return b[1]-a[1];}).slice(0,15);
+  chartH('chartDriverQty',qty.map(function(e){return e[0];}),qty.map(function(e){return e[1];}),'日均单量','#e67e22');
+  // ② 始发HUB(_hubO，已做 CNO→ONT / NJ070→EWR 归并) × 目的站点(领件站点前 5 位)
+  const c={};
+  filteredData.forEach(function(r){
+    const hub=(r._hubO||'').toString().trim();
+    const st=(r['目的站点']||'').toString().trim();
+    if(!hub||!st||st==='--')return;
+    const k=hub+' × '+st;
+    let e=c[k];if(!e)e=c[k]={ad:0,n:0};
+    const dd=parseFloat(r['妥投耗时(h)']);
+    if(dd&&!isNaN(dd)){e.ad+=dd;e.n++;}
+  });
+  const cand=Object.keys(c).map(function(k){return [k,c[k].ad/c[k].n,c[k].n]}).filter(function(e){return c[e[0]].n>=DRIVER_MIN_N});
+  const ad=cand.sort(function(a,b){return b[1]-a[1]}).slice(0,15);
+  chartH('chartDriverAd',ad.map(function(e){return e[0]}),ad.map(function(e){return e[1]}),'A-D均值(h)','#d35400',
+    function(v,ctx){const e=ad[ctx.dataIndex];return v.toFixed(1)+'h · '+(e?e[2]:0)+'单'});
+  const note=document.getElementById('driverAdNote');
+  if(note)note.textContent='共 '+Object.keys(c).length+' 个「始发HUB × 目的站点」组合，仅统计有效单量 ≥ '+DRIVER_MIN_N+' 的 '+cand.length+' 个（小样本均值不可靠已剔除）';
+}
+
+/* ===== 运营分析：A-D P95 时效热力图（ZONE × 目的大区 × 目的站点 × 始发HUB，四级钻取） =====
+   维度：行=ZONE(首层,升序) × 目的大区 × 目的站点 × 始发HUB(逐级点击展开) × 时间周期(横轴)。
+   单元格 = 该「ZONE / 目的大区 / 目的站点 / 始发HUB × 周期」组合的 A-D 时长 P95（95分位达成值,h）。
+   样本 < RHD_MIN_N 的组合/合计置空（"—"）；各层级取单量 TOP（目的大区/目的站点/始发HUB 见对应常量）。 */
+const ADP95_TOP_DEST=15;
+const ADP95_TOP_REG=8, ADP95_TOP_HUB=8;
+let adp95Expanded=new Set();
+function drawAdp95Period(){
+  const cont=document.getElementById('hmAdp95Period');if(!cont)return;
+  const noteN=document.getElementById('adp95MinN');if(noteN)noteN.textContent=RHD_MIN_N;
+  const noteT=document.getElementById('adp95TopN');if(noteT)noteT.textContent=ADP95_TOP_REG;
+  const noteD=document.getElementById('adp95TopDest');if(noteD)noteD.textContent=ADP95_TOP_DEST;
+  const noteH=document.getElementById('adp95TopHub');if(noteH)noteH.textContent=ADP95_TOP_HUB;
+  const pl=getPeriods(filteredData); if(!pl.length){cont.innerHTML='<div class="hm-nodata">暂无有效数据</div>';return;}
+  const root={children:{},agg:{}};
+  function nodeAt(pathArr){let cur=root;for(let i=0;i<pathArr.length;i++){const k=pathArr[i];if(!cur.children[k])cur.children[k]={key:k,children:{},agg:{},vol:0};cur=cur.children[k];}return cur;}
+  let anyLeaf=false;
+  filteredData.forEach(function(r){
+    const z=(r['GF_ZONE_FEDEX']||'').toString().trim();
+    const reg=(r['目的大区']||'').toString().trim();
+    const st=(r['目的站点']||'').toString().trim();
+    const hub=(r._hubO||'').toString().trim();
+    if(!z||!reg||!st||st==='--'||!hub)return;
+    const dd=parseFloat(r['妥投耗时(h)']);
+    if(!(dd>0&&!isNaN(dd)))return;
+    const per=periodOf(r); if(!per)return;
+    const leaf=nodeAt([z,reg,st,hub]);
+    if(!leaf.agg[per])leaf.agg[per]=[];
+    leaf.agg[per].push(dd);
+    anyLeaf=true;
+  });
+  if(!anyLeaf){cont.innerHTML='<div class="hm-nodata">暂无有效数据（请确认数据含 GF_ZONE_FEDEX / 目的大区 / 目的站点 / 实际始发Hub中心 / 妥投耗时(h) 列）</div>';return;}
+  function sumNode(node){
+    for(const ck in node.children){const ch=node.children[ck];sumNode(ch);
+      for(const per in ch.agg){if(!node.agg[per])node.agg[per]=[];node.agg[per]=node.agg[per].concat(ch.agg[per]);}
+      node.vol+=ch.vol;}
+    if(!Object.keys(node.children).length){for(const per in node.agg)node.vol+=node.agg[per].length;}
+    node.tot=[];for(const per in node.agg)node.tot=node.tot.concat(node.agg[per]);
+  }
+  sumNode(root);
+  const q95=function(a){if(!a||a.length<RHD_MIN_N)return null;const b=a.slice().sort(function(x,y){return x-y});return b[Math.max(0,Math.ceil(b.length*0.95)-1)];};
+  const valOf=function(node,per){return q95(node.agg[per]);};
+  const totalOf=function(node){return q95(node.tot);};
+  const TOP_N=[0,ADP95_TOP_REG,ADP95_TOP_DEST,ADP95_TOP_HUB];
+  const vals=[];
+  const rows=[];
+  const collect=function(node,depth,pathArr){
+    if(depth>=4)return;
+    let kids=Object.keys(node.children).map(function(k){return node.children[k];});
+    // 首层 ZONE 按数值升序；其余层级按单量降序（TOP N）
+    kids.sort(depth===0?zoneSort:function(a,b){return b.vol-a.vol;});
+    const top=TOP_N[depth]; if(top)kids=kids.slice(0,top);
+    kids.forEach(function(kid){
+      const newPath=pathArr.concat(kid.key);
+      const pathStr=newPath.join('||');
+      const exp=adp95Expanded.has(pathStr);
+      const isLeaf=depth===3;
+      pl.forEach(function(per){const v=valOf(kid,per);if(v!=null)vals.push(v);});
+      const tv=totalOf(kid);if(tv!=null)vals.push(tv);
+      rows.push({kid:kid,depth:depth,pathStr:pathStr});
+      if(exp&&!isLeaf)collect(kid,depth+1,newPath);
+    });
+  };
+  collect(root,0,[]);
+  pl.forEach(function(per){const v=valOf(root,per);if(v!=null)vals.push(v);});
+  const grand=totalOf(root);if(grand!=null)vals.push(grand);
+  if(!rows.length){cont.innerHTML='<div class="hm-nodata">暂无有效数据</div>';return;}
+  const vmn=vals.length?Math.min.apply(null,vals):0,vmx=vals.length?Math.max.apply(null,vals):1;
+  const colorOf=function(v){if(v==null)return{bg:'#f6f6f6',dark:false};let t=vmx>vmn?(v-vmn)/(vmx-vmn):0.5;t=Math.pow(Math.max(0,Math.min(1,t)),0.8);return hmColor(t);};
+  const fmt=function(v){return v==null?'':v.toFixed(1);};
+  const cellHtml=function(v){if(v==null)return '<td class="cell empty">—</td>';const col=colorOf(v);return '<td class="cell" style="background:'+col.bg+';color:'+(col.dark?'#fff':'#3a1400')+'">'+fmt(v)+'</td>';};
+  const totalCell=function(v){if(v==null)return '<td class="total">—</td>';const col=colorOf(v);return '<td class="total" style="background:'+col.bg+';color:'+(col.dark?'#fff':'#3a1400')+'">'+fmt(v)+'</td>';};
+  let body='';
+  rows.forEach(function(rw){
+    const kid=rw.kid,depth=rw.depth,pathStr=rw.pathStr,exp=adp95Expanded.has(pathStr);
+    const indent='　'.repeat(depth);
+    const arrow=exp?'▾':'▸';
+    body+='<tr class="'+(depth===0?'grp-row':'sub-row')+'" data-path="'+pathStr+'"><td class="row-head'+(depth>0?' sub':'')+' clickable">'+indent+arrow+' '+kid.key+'</td>';
+    pl.forEach(function(per){body+=cellHtml(valOf(kid,per));});
+    body+=totalCell(totalOf(kid))+'</tr>';
+  });
+  body+='<tr class="grand-row"><td class="row-head total">合计(P95)</td>';
+  pl.forEach(function(per){body+=totalCell(valOf(root,per));});
+  body+=totalCell(grand)+'</tr>';
+  const colsN=pl.length+2;
+  const heads=pl.map(function(p){return '<th>'+pLabel(p)+'</th>';}).join('');
+  let html='<div class="hm-wrap" style="overflow-x:auto"><table class="hm-table rhd" style="--cols:'+colsN+'"><colgroup>';
+  for(let i=0;i<colsN;i++)html+='<col style="width:'+(100/colsN)+'%">';
+  html+='</colgroup><thead><tr><th class="corner">维度（点击逐级展开）＼ 周期</th>'+heads+'<th class="total">合计(P95)</th></tr></thead><tbody>'+body+'</tbody></table>';
+  if(vals.length&&vmx>vmn){
+    html+='<div class="hm-legend"><span>低 '+fmt(vmn)+'h</span><span class="hm-legend-bar"></span><span>高 '+fmt(vmx)+'h（P95 达成值）</span></div>';
+  }
+  html+='</div>';
+  cont.innerHTML=html;
+}
+
+const RHD_MIN_N=20;
+
+/* ===== 经营分析：始发大区 × 周期 票均价格热力图（四级钻取：始发大区 → 始发HUB → 目的HUB → 目的站点） =====
+   行=始发大区（逐级点击展开 始发HUB → 目的HUB → 目的站点）；列=时间周期；单元格=票均价格(收入÷去重运单,$/票)。
+   每层仅显示单量 TOP（始发HUB/目的HUB TOP RDP_TOP_HUB、目的站点 TOP RDP_TOP_ST）；父级行聚合其下全部数据。
+   样本 < RHD_MIN_N 的组合/合计置空（"—"）；始发HUB/目的HUB 同时受全局筛选框影响。 */
+const RDP_TOP_HUB=12, RDP_TOP_ST=15;
+// rdpExpanded 复用为「层级路径」集合（分隔符 '||'），支持四级钻取
+let rdpExpanded=new Set();
+function drawRegionDestPeriod(){
+  const cont=document.getElementById('hmRhdRevPeriod');if(!cont)return;
+  const noteN=document.getElementById('rhdRevPeriodMinN');if(noteN)noteN.textContent=RHD_MIN_N;
+  const noteT=document.getElementById('rhdRevPeriodTopN');if(noteT)noteT.textContent=RDP_TOP_HUB;
+  const noteD=document.getElementById('rhdRevPeriodTopDest');if(noteD)noteD.textContent=RDP_TOP_ST;
+  const pl=getPeriods(filteredData); if(!pl.length){cont.innerHTML='<div class="hm-nodata">暂无有效数据</div>';return;}
+  const root={children:{},agg:{}};
+  function nodeAt(pathArr){let cur=root;for(let i=0;i<pathArr.length;i++){const k=pathArr[i];if(!cur.children[k])cur.children[k]={key:k,children:{},agg:{},vol:0};cur=cur.children[k];}return cur;}
+  let anyLeaf=false;
+  filteredData.forEach(function(r){
+    const reg=(r['发件大区']||'').toString().trim();
+    const oHub=(r._hubO||'').toString().trim();
+    const dHub=(r._hubD||'').toString().trim();
+    const st=(r['目的站点']||'').toString().trim();
+    if(!reg||!oHub||!dHub||!st||st==='--')return;
+    const per=periodOf(r); if(!per)return;
+    const oid=r._oid; const rv=parseFloat(r[COL_REV]);
+    const leaf=nodeAt([reg,oHub,dHub,st]);
+    let a=leaf.agg[per]; if(!a)a=leaf.agg[per]={rev:0,wb:new Set()};
+    if(oid&&r[COL_REVHIT]==='是'&&!isNaN(rv))a.wb.add(oid);
+    if(r[COL_REVHIT]==='是'&&rv&&!isNaN(rv))a.rev+=rv;
+    anyLeaf=true;
+  });
+  if(!anyLeaf){cont.innerHTML='<div class="hm-nodata">暂无有效数据（请确认数据含 发件大区 / 实际始发Hub中心 / 目的Hub中心 / 目的站点 / 收入 列）</div>';return;}
+  function sumNode(node){
+    let has=false;
+    for(const ck in node.children){const ch=node.children[ck];sumNode(ch);
+      for(const per in ch.agg){let a=node.agg[per];if(!a)a=node.agg[per]={rev:0,wb:new Set()};a.rev+=ch.agg[per].rev;ch.agg[per].wb.forEach(function(x){a.wb.add(x);});}
+      node.vol+=ch.vol;has=true;}
+    if(!has){for(const per in node.agg)node.vol+=node.agg[per].wb.size;}
+  }
+  sumNode(root);
+  const valOf=function(node,per){const a=node.agg[per];if(!a||a.wb.size<RHD_MIN_N)return null;return a.rev/a.wb.size;};
+  const totalOf=function(node){let rev=0;const wb=new Set();for(const per in node.agg){const a=node.agg[per];rev+=a.rev;a.wb.forEach(function(x){wb.add(x);});}if(wb.size<RHD_MIN_N)return null;return rev/wb.size;};
+  const TOP_N=[0,RDP_TOP_HUB,RDP_TOP_HUB,RDP_TOP_ST];
+  const vals=[];
+  const rows=[];
+  const collect=function(node,depth,pathArr){
+    if(depth>=4)return;
+    let kids=Object.keys(node.children).map(function(k){return node.children[k];});
+    kids.sort(function(a,b){return b.vol-a.vol;});
+    const top=TOP_N[depth]; if(top)kids=kids.slice(0,top);
+    kids.forEach(function(kid){
+      const newPath=pathArr.concat(kid.key);
+      const pathStr=newPath.join('||');
+      const exp=rdpExpanded.has(pathStr);
+      const isLeaf=depth===3;
+      pl.forEach(function(per){const v=valOf(kid,per);if(v!=null)vals.push(v);});
+      const tv=totalOf(kid);if(tv!=null)vals.push(tv);
+      rows.push({kid:kid,depth:depth,pathStr:pathStr,exp:exp,isLeaf:isLeaf});
+      if(exp&&!isLeaf)collect(kid,depth+1,newPath);
+    });
+  };
+  collect(root,0,[]);
+  pl.forEach(function(per){const v=valOf(root,per);if(v!=null)vals.push(v);});
+  const grand=totalOf(root);if(grand!=null)vals.push(grand);
+  if(!rows.length){cont.innerHTML='<div class="hm-nodata">暂无有效数据</div>';return;}
+  const vmn=vals.length?Math.min.apply(null,vals):0,vmx=vals.length?Math.max.apply(null,vals):1;
+  const colorOf=function(v){if(v==null)return{bg:'#f6f6f6',dark:false};let t=vmx>vmn?(v-vmn)/(vmx-vmn):0.5;t=Math.pow(Math.max(0,Math.min(1,t)),0.8);return hmColor(t);};
+  const fmt=function(v){return v==null?'':('$'+v.toFixed(2));};
+  const cellHtml=function(v){if(v==null)return '<td class="cell empty">—</td>';const col=colorOf(v);return '<td class="cell" style="background:'+col.bg+';color:'+(col.dark?'#fff':'#3a1400')+'">'+fmt(v)+'</td>';};
+  const totalCell=function(v){if(v==null)return '<td class="total">—</td>';const col=colorOf(v);return '<td class="total" style="background:'+col.bg+';color:'+(col.dark?'#fff':'#3a1400')+'">'+fmt(v)+'</td>';};
+  let body='';
+  rows.forEach(function(rw){
+    const kid=rw.kid,depth=rw.depth,pathStr=rw.pathStr,exp=rw.exp;
+    const indent='　'.repeat(depth);
+    const arrow=exp?'▾':'▸';
+    body+='<tr class="'+(depth===0?'grp-row':'sub-row')+'" data-path="'+pathStr+'"><td class="row-head'+(depth>0?' sub':'')+' clickable">'+indent+arrow+' '+kid.key+'</td>';
+    pl.forEach(function(per){body+=cellHtml(valOf(kid,per));});
+    body+=totalCell(totalOf(kid))+'</tr>';
+  });
+  body+='<tr class="grand-row"><td class="row-head total">合计(票均)</td>';
+  pl.forEach(function(per){body+=totalCell(valOf(root,per));});
+  body+=totalCell(grand)+'</tr>';
+  const colsN=pl.length+2;
+  const heads=pl.map(function(p){return '<th>'+pLabel(p)+'</th>';}).join('');
+  let html='<div class="hm-wrap" style="overflow-x:auto"><table class="hm-table rhd" style="--cols:'+colsN+'"><colgroup>';
+  for(let i=0;i<colsN;i++)html+='<col style="width:'+(100/colsN)+'%">';
+  html+='</colgroup><thead><tr><th class="corner">维度（点击逐级展开）＼ 周期</th>'+heads+'<th class="total">合计(票均)</th></tr></thead><tbody>'+body+'</tbody></table>';
+  if(vals.length&&vmx>vmn){
+    html+='<div class="hm-legend"><span>低 $'+vmn.toFixed(2)+'</span><span class="hm-legend-bar"></span><span>高 $'+vmx.toFixed(2)+'（票均$/票）</span></div>';
+  }
+  html+='</div>';
+  cont.innerHTML=html;
+}
+
+/* ===== 目的大区 × 周期 单票收入 / 派送成本 / A毛利 热力图（三级钻取：目的大区 → 目的HUB → 目的站点）=====
+   与 drawRegionDestPeriod 同构；metric: 'rev' 单票收入 / 'cost' 单票派送成本 / 'pg' 单票A毛利。
+   分母口径：rev=收入匹配=是 且有收入值；cost=有成本值；pg=收入与成本都有的同一订单集合 (收入−成本)÷单数。 */
+const DDP_TOP_HUB=12, DDP_TOP_ST=15;
+let ddpExpanded=new Set();
+function _ddpBlank(m){return m==='rev'?{rev:0,wb:new Set()}:m==='cost'?{cost:0,wbC:new Set()}:{revB:0,costB:0,wbB:new Set()};}
+function _ddpMerge(dst,src,m){if(m==='rev'){dst.rev+=src.rev;src.wb.forEach(function(x){dst.wb.add(x);});}else if(m==='cost'){dst.cost+=src.cost;src.wbC.forEach(function(x){dst.wbC.add(x);});}else{dst.revB+=src.revB;dst.costB+=src.costB;src.wbB.forEach(function(x){dst.wbB.add(x);});}}
+function _ddpSize(a,m){return m==='rev'?a.wb.size:m==='cost'?a.wbC.size:a.wbB.size;}
+function _ddpSum(a,m){return m==='rev'?a.rev:m==='cost'?a.cost:(a.revB-a.costB);}
+function _ddpSet(a,m){return m==='rev'?a.wb:m==='cost'?a.wbC:a.wbB;}
+function drawDestDrill(containerId,metric){
+  const cont=document.getElementById(containerId);if(!cont)return;
+  const nH=document.getElementById(containerId+'TopHub'),nS=document.getElementById(containerId+'TopSt'),nN=document.getElementById(containerId+'MinN');
+  if(nH)nH.textContent=DDP_TOP_HUB; if(nS)nS.textContent=DDP_TOP_ST; if(nN)nN.textContent=RHD_MIN_N;
+  const pl=getPeriods(filteredData); if(!pl.length){cont.innerHTML='<div class="hm-nodata">暂无有效数据</div>';return;}
+  const root={children:{},agg:{}};
+  function nodeAt(pathArr){let cur=root;for(let i=0;i<pathArr.length;i++){const k=pathArr[i];if(!cur.children[k])cur.children[k]={key:k,children:{},agg:{},vol:0};cur=cur.children[k];}return cur;}
+  let anyLeaf=false;
+  filteredData.forEach(function(r){
+    const reg=(r['目的大区']||'').toString().trim();
+    const dHub=(r._hubD||'').toString().trim();
+    const st=(r['目的站点']||'').toString().trim();
+    if(!reg||!dHub||!st||st==='--')return;
+    const per=periodOf(r); if(!per)return;
+    const oid=r._oid; const rv=parseFloat(r[COL_REV]); const ct=parseFloat(r[COL_COST]);
+    const hasRev=r[COL_REVHIT]==='是'&&!isNaN(rv); const hasCost=!isNaN(ct);
+    const leaf=nodeAt([reg,dHub,st]);
+    let a=leaf.agg[per]; if(!a)a=leaf.agg[per]=_ddpBlank(metric);
+    if(oid){
+      if(metric==='rev'){if(hasRev){a.rev+=rv;a.wb.add(oid);}}
+      else if(metric==='cost'){if(hasCost){a.cost+=ct;a.wbC.add(oid);}}
+      else{if(hasRev&&hasCost){a.revB+=rv;a.costB+=ct;a.wbB.add(oid);}}
+    }
+    anyLeaf=true;
+  });
+  if(!anyLeaf){cont.innerHTML='<div class="hm-nodata">暂无有效数据（请确认数据含 目的大区 / 目的Hub中心 / 目的站点 列）</div>';return;}
+  function sumNode(node){
+    let has=false;
+    for(const ck in node.children){const ch=node.children[ck];sumNode(ch);
+      for(const per in ch.agg){let a=node.agg[per];if(!a)a=node.agg[per]=_ddpBlank(metric);_ddpMerge(a,ch.agg[per],metric);}
+      node.vol+=ch.vol;has=true;}
+    if(!has){for(const per in node.agg)node.vol+=_ddpSize(node.agg[per],metric);}
+  }
+  sumNode(root);
+  const valOf=function(node,per){const a=node.agg[per];if(!a)return null;const sz=_ddpSize(a,metric);if(sz<RHD_MIN_N)return null;return _ddpSum(a,metric)/sz;};
+  const totalOf=function(node){let s=0;const wb=new Set();for(const per in node.agg){const a=node.agg[per];s+=_ddpSum(a,metric);_ddpSet(a,metric).forEach(function(x){wb.add(x);});}if(wb.size<RHD_MIN_N)return null;return s/wb.size;};
+  const TOP_N=[0,DDP_TOP_HUB,DDP_TOP_ST];
+  const vals=[],rows=[];
+  const collect=function(node,depth,pathArr){
+    if(depth>=3)return;
+    let kids=Object.keys(node.children).map(function(k){return node.children[k];});
+    kids.sort(function(a,b){return b.vol-a.vol;});
+    const top=TOP_N[depth]; if(top)kids=kids.slice(0,top);
+    kids.forEach(function(kid){
+      const newPath=pathArr.concat(kid.key);
+      const pathStr=newPath.join('||');
+      const exp=ddpExpanded.has(pathStr);
+      const isLeaf=depth===2;
+      pl.forEach(function(per){const v=valOf(kid,per);if(v!=null)vals.push(v);});
+      const tv=totalOf(kid);if(tv!=null)vals.push(tv);
+      rows.push({kid:kid,depth:depth,pathStr:pathStr,exp:exp,isLeaf:isLeaf});
+      if(exp&&!isLeaf)collect(kid,depth+1,newPath);
+    });
+  };
+  collect(root,0,[]);
+  pl.forEach(function(per){const v=valOf(root,per);if(v!=null)vals.push(v);});
+  const grand=totalOf(root);if(grand!=null)vals.push(grand);
+  if(!rows.length){cont.innerHTML='<div class="hm-nodata">暂无有效数据</div>';return;}
+  const vmn=vals.length?Math.min.apply(null,vals):0,vmx=vals.length?Math.max.apply(null,vals):1;
+  const colorOf=function(v){if(v==null)return{bg:'#f6f6f6',dark:false,neg:false};if(metric==='pg'&&v<0)return{bg:'#fdecea',dark:true,neg:true};let t=vmx>vmn?(v-vmn)/(vmx-vmn):0.5;t=Math.pow(Math.max(0,Math.min(1,t)),0.8);return hmColor(t);};
+  const fmt=function(v){return v==null?'':('$'+v.toFixed(2));};
+  const cellHtml=function(v){if(v==null)return '<td class="cell empty">—</td>';const col=colorOf(v);const ex=col.neg?'border:2px solid #d32f2f;font-weight:bold':'';return '<td class="cell" style="background:'+col.bg+';color:'+(col.dark?'#fff':'#3a1400')+(ex?';'+ex:'')+'">'+fmt(v)+'</td>';};
+  const totalCell=function(v){if(v==null)return '<td class="total">—</td>';const col=colorOf(v);const ex=col.neg?'border:2px solid #d32f2f;font-weight:bold':'';return '<td class="total" style="background:'+col.bg+';color:'+(col.dark?'#fff':'#3a1400')+(ex?';'+ex:'')+'">'+fmt(v)+'</td>';};
+  let body='';
+  rows.forEach(function(rw){
+    const kid=rw.kid,depth=rw.depth,pathStr=rw.pathStr,exp=rw.exp;
+    const indent='　'.repeat(depth);
+    const arrow=exp?'▾':'▸';
+    body+='<tr class="'+(depth===0?'grp-row':'sub-row')+'" data-path="'+pathStr+'"><td class="row-head'+(depth>0?' sub':'')+' clickable">'+indent+arrow+' '+kid.key+'</td>';
+    pl.forEach(function(per){body+=cellHtml(valOf(kid,per));});
+    body+=totalCell(totalOf(kid))+'</tr>';
+  });
+  body+='<tr class="grand-row"><td class="row-head total">合计</td>';
+  pl.forEach(function(per){body+=totalCell(valOf(root,per));});
+  body+=totalCell(grand)+'</tr>';
+  const colsN=pl.length+2;
+  const heads=pl.map(function(p){return '<th>'+pLabel(p)+'</th>';}).join('');
+  let html='<div class="hm-wrap" style="overflow-x:auto"><table class="hm-table rhd" style="--cols:'+colsN+'"><colgroup>';
+  for(let i=0;i<colsN;i++)html+='<col style="width:'+(100/colsN)+'%">';
+  html+='</colgroup><thead><tr><th class="corner">目的大区（点击展开 目的HUB → 目的站点）＼ 周期</th>'+heads+'<th class="total">合计</th></tr></thead><tbody>'+body+'</tbody></table>';
+  if(vals.length&&vmx>vmn){
+    html+='<div class="hm-legend"><span>低 $'+vmn.toFixed(2)+'</span><span class="hm-legend-bar"></span><span>高 $'+vmx.toFixed(2)+'（$/票）</span></div>';
+  }
+  html+='</div>';
+  cont.innerHTML=html;
+}
+
+/* ===== 收入分布（对应 Tableau「收入分布情况」：按客户聚合收入金额，仅含收入数据源时显示） ===== */
+/* 客户收入 TOP10 + 同一批客户的票均收入（$/票）
+   票均 = 该客户收入金额合计 ÷ 该客户运单去重数（数据源一行一票且运单号唯一，按行计数即可）
+   右侧图沿用左侧的客户与排序，便于一眼看出「收入高是靠量大还是单价高」 */
+function drawRevCustomer(){
+  const m={},mo={};
+  filteredData.forEach(function(r){
+    if(!hasRevenue)return;
+    const k=(r['客户简称']||'').toString().trim();if(!k)return;
+    const rv=parseFloat(r[COL_REV]);
+    if(!isNaN(rv))m[k]=(m[k]||0)+rv;
+    if(r._oid)mo[k]=(mo[k]||0)+1;
+  });
+  const top=Object.entries(m).sort(function(a,b){return b[1]-a[1];}).slice(0,10);
+  chartH('chartRevCustomer',top.map(function(e){return e[0];}),top.map(function(e){return e[1];}),'收入金额($)','#1f6feb',
+    function(v){return v.toLocaleString('en-US',{maximumFractionDigits:0})});
+  chartH('chartRevPerCustomer',top.map(function(e){return e[0];}),
+    top.map(function(e){return mo[e[0]]?+(e[1]/mo[e[0]]).toFixed(2):0}),'票均收入($/票)','#2e7d32',
+    function(v){return v.toFixed(2)});
+}
+
+
+
+/* ===== 热力图（重做视觉） ===== */
+/* 聚合：运单去重(_oid) ÷ 天数去重(_dateStr)，按单元格 / 行 / 列 / 总计分别维护去重集合 */
+function aggCells(dataset,oField,dField){
+  oField=oField||'发件大区';dField=dField||'目的大区';
+  const cellWB={},cellDay={},originWB={},originDay={},destWB={},destDay={};
+  const grandWB=new Set(),grandDay=new Set();const originSet=new Set();const destSet=new Set();
+  dataset.forEach(r=>{const o=(r[oField]||'').toString().trim(),de=(r[dField]||'').toString().trim();
+    if(o&&de&&o!=='未知'&&de!=='未知'){
+      originSet.add(o);destSet.add(de);const key=o+'|'+de;
+      const wb=r._oid||'',day=r._dateStr||'';
+      if(!cellWB[key]){cellWB[key]=new Set();cellDay[key]=new Set();}
+      if(!originWB[o]){originWB[o]=new Set();originDay[o]=new Set();}
+      if(!destWB[de]){destWB[de]=new Set();destDay[de]=new Set();}
+      if(wb){cellWB[key].add(wb);grandWB.add(wb);originWB[o].add(wb);destWB[de].add(wb);}
+      if(day){cellDay[key].add(day);grandDay.add(day);originDay[o].add(day);destDay[de].add(day);}
+    }});
+  return {cellWB,cellDay,originWB,originDay,destWB,destDay,grandWB,grandDay,originSet,destSet};
+}
+/* prevData：上一周期数据（由 upd() 计算一次后传入，避免三处各自再做一次全量 filter） */
+function drawHeatmap(data,prevData){
+  const container=document.getElementById('heatmapContainer');
+  if(!container)return;
+  // 日均单量 = 运单去重数(_oid) / 天数去重(_dateStr)，按单元格 + 行/列/总计分别去重并集
+  const agg=aggCells(data);
+  const cellWB=agg.cellWB,cellDay=agg.cellDay,originWB=agg.originWB,originDay=agg.originDay,destWB=agg.destWB,destDay=agg.destDay;
+  const grandWB=agg.grandWB,grandDay=agg.grandDay;const originSet=agg.originSet;const destSet=agg.destSet;
+  // 清理上一次生成的热力图内容（保留 canvas，避免重复图例/表格）
+  container.querySelectorAll('.hm-wrap, .hm-legend, .hm-nodata').forEach(function(e){e.remove();});
+  if(originSet.size===0||destSet.size===0){const n=document.createElement('div');n.className='hm-nodata';n.textContent='暂无数据（发件/目的大区为空的行不参与）';container.appendChild(n);const we=document.getElementById('hmWow');if(we){we.className='hm-wow';we.textContent=''}return}
+  const avgOf=function(wb,day){return day.size>0?wb.size/day.size:0};
+  const regionData={};Object.keys(cellWB).forEach(k=>{regionData[k]=avgOf(cellWB[k],cellDay[k])});
+  let origins=[...originSet].sort(regionSort),dests=[...destSet].sort(regionSort);
+  const originTotal={},destTotal={};
+  origins.forEach(o=>{originTotal[o]=avgOf(originWB[o],originDay[o])});
+  dests.forEach(d=>{destTotal[d]=avgOf(destWB[d],destDay[d])});
+  const grandTotal=avgOf(grandWB,grandDay);
+  // 颜色刻度统一取 所有单元格 + 行合计 + 列合计 + 总计 的最大值，保证整图深浅一致
+  // 色阶刻度只取「单元格」最大值：把行/列/总计也计入会让刻度被总计撑大，
+  // 所有格子都挤在 0~15% 的浅色端而看不出差异；行/列/总计本身最大，会自然落在最深端。
+  const cellVals=[];Object.values(regionData).forEach(v=>cellVals.push(v));
+  const maxQty=Math.max.apply(null,[1].concat(cellVals));
+  // 每个单元格的周环比：仅单选某周时计算（多选/全部不展示），与整体角标同口径
+  let prevRegion=null,prevOriginTotal=null,prevDestTotal=null,prevGrandTotal=null;
+  if(prevData&&prevData.length){
+    const pa=aggCells(prevData);prevRegion={};Object.keys(pa.cellWB).forEach(k=>{prevRegion[k]=avgOf(pa.cellWB[k],pa.cellDay[k])});
+    prevOriginTotal={};Object.keys(pa.originWB).forEach(o=>{prevOriginTotal[o]=avgOf(pa.originWB[o],pa.originDay[o])});
+    prevDestTotal={};Object.keys(pa.destWB).forEach(d=>{prevDestTotal[d]=avgOf(pa.destWB[d],pa.destDay[d])});
+    prevGrandTotal=avgOf(pa.grandWB,pa.grandDay);
+  }
+  const wowOf=function(cur,prev,prec){if(prev==null||prev===0)return'';const f=fmtC(cur,prev,prec);return'<span class="cell-wow '+f.c+'">'+f.t.split('　Δ')[0]+'</span>'};
+  // 周环比（仅单选某周期展示，多选/全部隐藏 —— 与 KPI 卡逻辑一致）
+  const periodName=viewMode==='week'?'周环比':(viewMode==='day'?'日环比':'月环比');
+  const wowEl=document.getElementById('hmWow');
+  if(wowEl){wowEl.className='hm-wow';wowEl.textContent='';
+    if(prevGrandTotal!=null&&prevGrandTotal>0){const f=fmtC(grandTotal,prevGrandTotal,1);wowEl.textContent=periodName+' '+f.t;wowEl.className='hm-wow '+f.c;}
+  }
+  // 单量分布高度右偏（少数格子极大、多数很小），线性映射会把低值全压成浅色；
+  // 用 sqrt 拉伸低值区间，让中小格子也能拉开色差
+  const colorFor=function(v){const t=Math.min(1,Math.sqrt(Math.max(0,maxQty>0?v/maxQty:0)));
+    const c=hmColor(t);return{t:t,bg:c.bg,dark:c.dark};
+  };
+  const fmtN=function(v){return (v||0).toFixed(1)};
+  const cols=dests.length+2;
+  let html='<div class="hm-wrap"><table class="hm-table" style="--cols:'+cols+'"><colgroup>';
+  for(let i=0;i<cols;i++)html+='<col style="width:'+(100/cols)+'%">';
+  html+='</colgroup><thead><tr><th class="corner">发件＼目的</th>';
+  dests.forEach(d=>{html+='<th>'+d+'<span class="sub">'+fmtN(destTotal[d])+' 单/天</span></th>'});
+  html+='<th class="total">合计</th></tr></thead><tbody>';
+  origins.forEach(o=>{html+='<tr><td class="row-head">'+o+'<span class="sub">'+fmtN(originTotal[o])+' 单/天</span></td>';
+    dests.forEach(d=>{const k=o+'|'+d,qty=regionData[k]||0,pct=grandTotal>0?(qty/grandTotal*100):0;
+      if(qty>0){const c=colorFor(qty);
+        let wowHtml='';
+        if(prevRegion){const pv=prevRegion[k]||0,f=fmtC(qty,pv,1);wowHtml='<span class="cell-wow '+f.c+'">'+f.t.split('　Δ')[0]+'</span>'}
+        html+='<td class="cell" style="background:'+c.bg+';color:'+(c.dark?'#fff':'#3a1400')+'">'+fmtN(qty)+'<span class="sub">'+pct.toFixed(1)+'%</span>'+wowHtml+'</td>'}
+      else{html+='<td class="cell empty">—</td>'}});
+    const rpct=grandTotal>0?(originTotal[o]/grandTotal*100):0;
+    const rc=colorFor(originTotal[o]);html+='<td class="total" style="background:'+rc.bg+';color:'+(rc.dark?'#fff':'#3a1400')+'">'+fmtN(originTotal[o])+'<span class="sub">'+rpct.toFixed(1)+'%</span>'+wowOf(originTotal[o],prevOriginTotal?prevOriginTotal[o]:null,1)+'</td></tr>'});
+  html+='<tr><td class="row-head total">总计</td>';
+  dests.forEach(d=>{const tv=destTotal[d];const c=colorFor(tv);html+='<td class="total" style="background:'+c.bg+';color:'+(c.dark?'#fff':'#3a1400')+'">'+fmtN(tv)+'<span class="sub">'+(grandTotal>0?(tv/grandTotal*100).toFixed(1):'0')+'%</span>'+wowOf(tv,prevDestTotal?prevDestTotal[d]:null,1)+'</td>'});
+  const gc=colorFor(grandTotal);html+='<td class="grand" style="background:'+gc.bg+';color:'+(gc.dark?'#fff':'#3a1400')+'">'+fmtN(grandTotal)+' 单/天'+wowOf(grandTotal,prevGrandTotal,1)+'</td></tr>';
+  html+='</tbody></table></div>';
+  container.insertAdjacentHTML('beforeend',html);
+}
+
+/* ===== 发单量前十客户 × 重量段 票均收入热力图 =====
+   行=发单量前十客户（按全周期运单去重数降序），列=重量段；
+   单元格主数字=该客户该重量段票均收入($)=收入÷票数(去重运单)，颜色越深日均单量(单/天)越高；
+   下排=该组合日均单量占全量比重(%)；行/列/总计主数字=对应维度票均收入，副标签=日均单量(单/天)。 */
+function drawCustWeightHeatmap(data,topN){
+  const container=document.getElementById('custSegHeatContainer'); if(!container)return;
+  const wowEl=document.getElementById('custSegWow');
+  const N=topN||10;
+  const agg=aggCells(data,'客户简称','重量段');
+  const cellWB=agg.cellWB,cellDay=agg.cellDay,originWB=agg.originWB,originDay=agg.originDay,
+        destWB=agg.destWB,destDay=agg.destDay,grandWB=agg.grandWB,grandDay=agg.grandDay;
+  const avgOf=function(wb,day){return day.size>0?wb.size/day.size:0};
+  if(!agg.originSet.size||!agg.destSet.size){
+    container.innerHTML='<div class="hm-nodata">暂无数据（客户 / 重量段为空的行不参与）</div>';
+    if(wowEl){wowEl.className='hm-wow';wowEl.textContent=''}
+    return;
+  }
+  // 行：TOP10 客户（按全周期运单去重数降序，与模块五其它客户图一致）
+  const custOids={};agg.originSet.forEach(function(c){custOids[c]=originWB[c].size});
+  const custs=[...agg.originSet].sort(function(a,b){return custOids[b]-custOids[a]});
+  const topCusts=custs.slice(0,N);
+  // 列：重量段按数值升序
+  const segs=[...agg.destSet].sort(weightSegSort);
+  const grandTotal=avgOf(grandWB,grandDay);
+  const pctOf=function(v){return grandTotal>0?v/grandTotal*100:0};
+  // 票均收入累加：key 'c|s' 单元格，'@c|c' 行，'@s|s' 列，'@g' 总计
+  const rev={};
+  const getRev=function(k){if(!rev[k])rev[k]={oids:new Set(),tri:0};return rev[k];};
+  data.forEach(function(r){
+    const c=(r['客户简称']||'').toString().trim()||'未标注';
+    const s=(r['重量段']||'').toString().trim();
+    if(!c||!s)return;
+    const oid=r._oid; const rv=parseFloat(r[COL_REV]);
+    const e=getRev(c+'|'+s); if(oid&&r[COL_REVHIT]==='是'&&!isNaN(rv))e.oids.add(oid); if(r[COL_REVHIT]==='是'&&!isNaN(rv))e.tri+=rv;
+    const er=getRev('@c|'+c); if(oid&&r[COL_REVHIT]==='是'&&!isNaN(rv))er.oids.add(oid); if(r[COL_REVHIT]==='是'&&!isNaN(rv))er.tri+=rv;
+    const es=getRev('@s|'+s); if(oid&&r[COL_REVHIT]==='是'&&!isNaN(rv))es.oids.add(oid); if(r[COL_REVHIT]==='是'&&!isNaN(rv))es.tri+=rv;
+    const eg=getRev('@g'); if(oid&&r[COL_REVHIT]==='是'&&!isNaN(rv))eg.oids.add(oid); if(r[COL_REVHIT]==='是'&&!isNaN(rv))eg.tri+=rv;
+  });
+  const arpu=function(e){return (e&&e.oids.size)?e.tri/e.oids.size:null;};
+  const grandApu=arpu(rev['@g']);
+  // 色阶：按「日均单量(单/天)」取深浅（副标签口径）——单元格日均单量=去重运单数÷去重天数
+  const qtyOf=function(c,s){const wb=cellWB[c+'|'+s],day=cellDay[c+'|'+s];return (wb&&day&&day.size>0)?wb.size/day.size:0};
+  const cellVals=[];
+  topCusts.forEach(function(c){segs.forEach(function(s){const q=qtyOf(c,s);if(q>0)cellVals.push(q);});});
+  const vmn=cellVals.length?Math.min.apply(null,cellVals):0;
+  const vmx=cellVals.length?Math.max.apply(null,cellVals):1;
+  const colorFor=function(q){
+    if(!(q>0))return hmColor(0);
+    let t=vmx>vmn?(q-vmn)/(vmx-vmn):0.5;t=Math.pow(Math.max(0,Math.min(1,t)),0.8);
+    return hmColor(t);
+  };
+  const fmtN=function(v){return (v==null?0:v).toFixed(2);};
+  const fmtN1=function(v){return (v==null?0:v).toFixed(1);};
+  const cols=segs.length+2;
+  let html='<div class="hm-wrap"><table class="hm-table" style="--cols:'+cols+'"><colgroup>';
+  for(let i=0;i<cols;i++)html+='<col style="width:'+(100/cols)+'%">';
+  html+='</colgroup><thead><tr><th class="corner">客户＼重量段</th>';
+  segs.forEach(function(s){html+='<th>'+s+'<span class="sub">'+fmtN1(avgOf(destWB[s],destDay[s]))+' 单/天</span></th>'});
+  html+='<th class="total">合计</th></tr></thead><tbody>';
+  topCusts.forEach(function(c){
+    const ca=arpu(rev['@c|'+c]);
+    html+='<tr><td class="row-head">'+c+'<span class="sub">'+fmtN1(avgOf(originWB[c],originDay[c]))+' 单/天</span></td>';
+    segs.forEach(function(s){
+      const a=arpu(rev[c+'|'+s]);
+      if(a!=null){const col=colorFor(qtyOf(c,s));
+        // 占比口径修正：该重量段货量 ÷ 该客户总发货量（即该重量段占该客户发货量的比重）
+        const segSet=cellWB[c+'|'+s], segN=segSet?segSet.size:0, custN=originWB[c]?originWB[c].size:0;
+        const sh=custN?segN/custN*100:0;
+        html+='<td class="cell" style="background:'+col.bg+';color:'+(col.dark?'#fff':'#3a1400')+'">'+fmtN(a)+'<span class="sub">'+sh.toFixed(1)+'%</span></td>'}
+      else{html+='<td class="cell empty">—<span class="sub">0%</span></td>'}
+    });
+    const rc=colorFor(avgOf(originWB[c],originDay[c]));
+    html+='<td class="total" style="background:'+rc.bg+';color:'+(rc.dark?'#fff':'#3a1400')+'">'+fmtN(ca)+'<span class="sub">'+pctOf(avgOf(originWB[c],originDay[c])).toFixed(1)+'%</span></td></tr>';
+  });
+  html+='<tr><td class="row-head total">总计</td>';
+  segs.forEach(function(s){const a=arpu(rev['@s|'+s]);const col=colorFor(avgOf(destWB[s],destDay[s]));
+    html+='<td class="total" style="background:'+col.bg+';color:'+(col.dark?'#fff':'#3a1400')+'">'+fmtN(a)+'<span class="sub">'+pctOf(avgOf(destWB[s],destDay[s])).toFixed(1)+'%</span></td>'});
+  const gc=colorFor(grandTotal);
+  html+='<td class="grand" style="background:'+gc.bg+';color:'+(gc.dark?'#fff':'#3a1400')+'">'+fmtN(grandApu)+'<span class="sub">100%</span></td></tr>';
+  html+='</tbody></table>';
+  if(vmx>vmn)html+='<div class="hm-legend"><span>低 '+fmtN1(vmn)+' 单/天</span><span class="hm-legend-bar"></span><span>高 '+fmtN1(vmx)+' 单/天</span></div>';
+  html+='</div>';
+  container.innerHTML=html;
+  if(wowEl){wowEl.className='hm-wow flat';wowEl.textContent='全局票均收入 $'+fmtN(grandApu)}
+}
+
+/* ===== 始发HUB × 目的HUB 热力图（逻辑同发件大区×目的大区，字段替换为实际始发/目的 Hub 中心） ===== */
+/* prevData：同 drawHeatmap，由 upd() 传入复用 */
+function drawHubHeatmap(data,prevData){
+  const container=document.getElementById('hubHeatmapContainer');
+  if(!container)return;
+  const oField='_hubO',dField='_hubD';   // derive() 已做别名归并（CNO.G→ONT.G、NJ070→EWR.G）
+  const agg=aggCells(data,oField,dField);
+  const cellWB=agg.cellWB,cellDay=agg.cellDay,originWB=agg.originWB,originDay=agg.originDay,destWB=agg.destWB,destDay=agg.destDay;
+  const grandWB=agg.grandWB,grandDay=agg.grandDay;const originSet=agg.originSet;const destSet=agg.destSet;
+  container.querySelectorAll('.hm-wrap, .hm-legend, .hm-nodata').forEach(function(e){e.remove();});
+  if(originSet.size===0||destSet.size===0){const n=document.createElement('div');n.className='hm-nodata';n.textContent='暂无数据（请确认数据含 实际始发Hub中心 / 目的Hub中心 列）';container.appendChild(n);const we=document.getElementById('hubWow');if(we){we.className='hm-wow';we.textContent=''}return}
+  const avgOf=function(wb,day){return day.size>0?wb.size/day.size:0};
+  const regionData={};Object.keys(cellWB).forEach(k=>{regionData[k]=avgOf(cellWB[k],cellDay[k])});
+  let origins=[...originSet].sort(regionSort),dests=[...destSet].sort(regionSort);
+  const originTotal={},destTotal={};
+  origins.forEach(o=>{originTotal[o]=avgOf(originWB[o],originDay[o])});
+  dests.forEach(d=>{destTotal[d]=avgOf(destWB[d],destDay[d])});
+  const grandTotal=avgOf(grandWB,grandDay);
+  // 色阶刻度只取「单元格」最大值：把行/列/总计也计入会让刻度被总计撑大，
+  // 所有格子都挤在 0~15% 的浅色端而看不出差异；行/列/总计本身最大，会自然落在最深端。
+  const cellVals=[];Object.values(regionData).forEach(v=>cellVals.push(v));
+  const maxQty=Math.max.apply(null,[1].concat(cellVals));
+  let prevRegion=null,prevOriginTotal=null,prevDestTotal=null,prevGrandTotal=null;
+  if(prevData&&prevData.length){
+    const pa=aggCells(prevData,oField,dField);prevRegion={};Object.keys(pa.cellWB).forEach(k=>{prevRegion[k]=avgOf(pa.cellWB[k],pa.cellDay[k])});
+    prevOriginTotal={};Object.keys(pa.originWB).forEach(o=>{prevOriginTotal[o]=avgOf(pa.originWB[o],pa.originDay[o])});
+    prevDestTotal={};Object.keys(pa.destWB).forEach(d=>{prevDestTotal[d]=avgOf(pa.destWB[d],pa.destDay[d])});
+    prevGrandTotal=avgOf(pa.grandWB,pa.grandDay);
+  }
+  const wowOf=function(cur,prev,prec){if(prev==null||prev===0)return'';const f=fmtC(cur,prev,prec);return'<span class="cell-wow '+f.c+'">'+f.t.split('　Δ')[0]+'</span>'};
+  const periodName=viewMode==='week'?'周环比':(viewMode==='day'?'日环比':'月环比');
+  const wowEl=document.getElementById('hubWow');
+  if(wowEl){wowEl.className='hm-wow';wowEl.textContent='';
+    if(prevGrandTotal!=null&&prevGrandTotal>0){const f=fmtC(grandTotal,prevGrandTotal,1);wowEl.textContent=periodName+' '+f.t;wowEl.className='hm-wow '+f.c;}
+  }
+  // 单量分布高度右偏（少数格子极大、多数很小），线性映射会把低值全压成浅色；
+  // 用 sqrt 拉伸低值区间，让中小格子也能拉开色差
+  const colorFor=function(v){const t=Math.min(1,Math.sqrt(Math.max(0,maxQty>0?v/maxQty:0)));
+    const c=hmColor(t);return{t:t,bg:c.bg,dark:c.dark};
+  };
+  const fmtN=function(v){return (v||0).toFixed(1)};
+  const cols=dests.length+2;
+  let html='<div class="hm-wrap"><table class="hm-table" style="--cols:'+cols+'"><colgroup>';
+  for(let i=0;i<cols;i++)html+='<col style="width:'+(100/cols)+'%">';
+  html+='</colgroup><thead><tr><th class="corner">始发HUB＼目的HUB</th>';
+  dests.forEach(d=>{html+='<th>'+d+'<span class="sub">'+fmtN(destTotal[d])+' 单/天</span></th>'});
+  html+='<th class="total">合计</th></tr></thead><tbody>';
+  origins.forEach(o=>{html+='<tr><td class="row-head">'+o+'<span class="sub">'+fmtN(originTotal[o])+' 单/天</span></td>';
+    dests.forEach(d=>{const k=o+'|'+d,qty=regionData[k]||0,pct=grandTotal>0?(qty/grandTotal*100):0;
+      if(qty>0){const c=colorFor(qty);
+        let wowHtml='';
+        if(prevRegion){const pv=prevRegion[k]||0,f=fmtC(qty,pv,1);wowHtml='<span class="cell-wow '+f.c+'">'+f.t.split('　Δ')[0]+'</span>'}
+        html+='<td class="cell" style="background:'+c.bg+';color:'+(c.dark?'#fff':'#3a1400')+'">'+fmtN(qty)+'<span class="sub">'+pct.toFixed(1)+'%</span>'+wowHtml+'</td>'}
+      else{html+='<td class="cell empty">—</td>'}});
+    const rpct=grandTotal>0?(originTotal[o]/grandTotal*100):0;
+    const rc=colorFor(originTotal[o]);html+='<td class="total" style="background:'+rc.bg+';color:'+(rc.dark?'#fff':'#3a1400')+'">'+fmtN(originTotal[o])+'<span class="sub">'+rpct.toFixed(1)+'%</span>'+wowOf(originTotal[o],prevOriginTotal?prevOriginTotal[o]:null,1)+'</td></tr>'});
+  html+='<tr><td class="row-head total">总计</td>';
+  dests.forEach(d=>{const tv=destTotal[d];const c=colorFor(tv);html+='<td class="total" style="background:'+c.bg+';color:'+(c.dark?'#fff':'#3a1400')+'">'+fmtN(tv)+'<span class="sub">'+(grandTotal>0?(tv/grandTotal*100).toFixed(1):'0')+'%</span>'+wowOf(tv,prevDestTotal?prevDestTotal[d]:null,1)+'</td>'});
+  const gc=colorFor(grandTotal);html+='<td class="grand" style="background:'+gc.bg+';color:'+(gc.dark?'#fff':'#3a1400')+'">'+fmtN(grandTotal)+' 单/天'+wowOf(grandTotal,prevGrandTotal,1)+'</td></tr>';
+  html+='</tbody></table></div>';
+  container.insertAdjacentHTML('beforeend',html);
+  // HUB 字段覆盖率提示：部分日期缺「实际始发Hub中心/目的Hub中心」，这些天不进入矩阵，
+  // 日均按实际覆盖天数计算，故与总览日均单量不完全相等（不提示易被误读为数据错误）
+  const note=document.getElementById('hubCoverNote');
+  if(note){
+    const allDays=new Set();data.forEach(function(r){if(r._dateStr)allDays.add(r._dateStr)});
+    if(allDays.size&&grandDay.size<allDays.size){
+      note.style.display='';
+      note.textContent='⚠ 覆盖 '+grandDay.size+'/'+allDays.size+' 天：另有 '+(allDays.size-grandDay.size)+' 天 HUB 字段为空未计入本矩阵（日均分母按实际覆盖天数计算，故与总览日均单量不等）';
+    }else note.style.display='none';
+  }
+}
+
+
+function checkLibs(){
+  const m=[];
+  if(typeof XLSX==='undefined')m.push('SheetJS(XLSX)');
+  if(typeof Chart==='undefined')m.push('Chart.js');
+  if(typeof ChartDataLabels==='undefined')m.push('chartjs-plugin-datalabels');
+  if(m.length){alert('以下依赖库未加载，看板无法运行：\n'+m.join('\n')+'\n\n请确认 libs/ 文件夹与本 HTML 文件在同一目录下。');return false}
+  return true
+}
+/* 进行中周期：只判定「最后一个周期」——其去重天数 < 该周期应有天数（周=7 / 月=当月天数）。
+   早期周期（如 W1 只有 4 天数据）不参与判定，避免误标。 */
+function calcPartial(){
+  PARTIAL=new Set();
+  const pl=ALL_PERIODS.length?ALL_PERIODS:getPeriods(rawData);
+  if(!pl.length)return;
+  const last=pl[pl.length-1];
+  const ds=new Set();
+  rawData.forEach(function(r){if(periodOf(r)===last&&r._dateStr)ds.add(r._dateStr)});
+  let full=7;
+  if(viewMode==='month'){const y=+last.slice(0,4),m=+last.slice(5,7);full=new Date(y,m,0).getDate()}
+  else if(viewMode==='day'){full=1;}   // 日维度：一个周期就是一天，不判定「进行中」
+  if(ds.size>0&&ds.size<full)PARTIAL.add(last);
+}
+/* 各周期收入覆盖率（一次全量扫描后缓存）：匹配率明显偏低的周期，单票收入/毛利不可横比 */
+function calcPeriodCoverage(){
+  PERIOD_COV={};
+  if(!hasRevenue)return;
+  const hit={},tot={};
+  rawData.forEach(function(r){
+    const p=periodOf(r);if(!p)return;
+    tot[p]=(tot[p]||0)+1;
+    if(r[COL_REVHIT]==='是')hit[p]=(hit[p]||0)+1;
+  });
+  Object.keys(tot).forEach(function(p){PERIOD_COV[p]=(hit[p]||0)/tot[p]*100});
+}
+/* 数据健康度：缺失率与收入匹配率（全量扫描，延后执行避免阻塞首屏） */
+function computeHealth(){
+  const bar=document.getElementById('healthBar');
+  if(!bar||!rawData.length)return;
+  let missD=0,missO=0,missDest=0,hit=0;
+  const n=rawData.length;
+  rawData.forEach(function(r){
+    const d=parseFloat(r['妥投耗时(h)']);if(!(d&&!isNaN(d)))missD++;
+    const o=(r['发件大区']||'').toString().trim(),de=(r['目的大区']||'').toString().trim();
+    if(!o)missO++;
+    if(!de)missDest++;
+    if(hasRevenue&&r[COL_REVHIT]==='是')hit++;
+  });
+  const pct=function(x){return (x/n*100).toFixed(2)};
+  let html='<span class="hb-title">数据健康度</span>';
+  html+='<span class="hb-item'+(missD/n>0.05?' warn':'')+'">妥投耗时缺失 '+pct(missD)+'%</span>';
+  html+='<span class="hb-item'+(missO/n>0.01?' warn':'')+'">发件大区缺失 '+pct(missO)+'%</span>';
+  html+='<span class="hb-item'+(missDest/n>0.01?' warn':'')+'">目的大区缺失 '+pct(missDest)+'%</span>';
+  if(hasRevenue){
+    const mr=hit/n*100;
+    html+='<span class="hb-item'+(mr<95?' bad':'')+'">收入匹配率 '+mr.toFixed(2)+'%</span>';
+  }
+  html+='<span class="hb-item">共 '+n.toLocaleString()+' 行</span>';
+  bar.innerHTML=html;
+  bar.style.display='flex';
+}
+/* 解析后置：填充 rawData + 重建筛选项 + 触发全量刷新（导入 / 自动加载共用） */
+function applyRawData(arr, fileName){
+  const b=document.getElementById('autoBanner'); if(b)b.style.display='none';
+  if(!arr.length)throw new Error('未解析到任何数据，请确认文件含正确表头（需含 发件大区 / 目的大区 / 运单号 / OG首次签入时间 等；周次缺失时可由日期自动推算）');
+  rawData=arr;
+  ALL_PERIODS=getPeriods(rawData);        // 载入后缓存当前维度的全量周期列表
+  hasRevenue=!!(COL_REV in rawData[0])&&!!(COL_REVHIT in rawData[0]);   // 需同时含收入金额与收入匹配列，否则收入类统一降级，避免两套指标静默分裂
+  selectedWeeks.clear();selectedMonths.clear();selectedDays.clear();
+  document.getElementById('fileName').innerHTML='当前文件：<span class="highlight">'+fileName+'</span>';
+  calcPartial();
+  calcPeriodCoverage();
+  popFilters(rawData);
+  buildPeriodDropdown();
+  applyFilters();
+  setTimeout(computeHealth,60);            // 全量扫描较重，延后执行
+}
+function showLoadBanner(){
+  const b=document.getElementById('autoBanner');
+  if(!b)return;
+  b.style.display='block';
+  b.innerHTML='本站点为纯前端看板，<b>不含数据源</b>。请点击上方「<b>导入 Excel 数据</b>」按钮，选择本地 CSV / XLSX 数据文件上传（建议使用 23 列含收入列的合并数据源，如 <code>日常监控数据源_2026_含收入.csv</code>），上传解析完成后即可查看全部图表。';
+}
+/* 打开即自动加载默认数据源：通过 fetch 读取合并后的 CSV（需以本地 http 服务打开）。
+   数据规模约 140 万行 / 250MB，无法内联为 data.js，故 file:// 双击方式不自动加载，
+   此时显示引导横幅，用户可点「导入」手动选择 CSV。 */
+function autoLoad(){
+  const info=document.getElementById('dataInfo');
+  const parse=function(text,label){
+    info.textContent='正在解析默认数据源（'+((text.length/1048576)|0)+'MB），请勿关闭页面…';
+    setTimeout(function(){
+      try{
+        const t0=Date.now();
+        const arr=parseExcel(text,'string');
+        applyRawData(arr,label);
+        info.textContent=arr.length+' 条记录已加载（默认数据源，'+((Date.now()-t0)/1000).toFixed(1)+'s）';
+      }catch(err){console.error(err);info.textContent='默认数据源解析失败';showLoadBanner();}
+    },30);
+  };
+  // 优先加载含收入列的关联数据源；不存在时自动回退到纯订单数据源
+  fetch('日常监控数据源_2026_含收入.csv',{cache:'no-store'}).then(function(r){
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    return r.text();
+  }).then(function(txt){
+    if(txt&&txt.length>10)parse(txt,'日常监控数据源_2026_含收入.csv（自动）');
+    else throw new Error('empty');
+  }).catch(function(){
+    return fetch('日常监控数据源_2026.csv',{cache:'no-store'}).then(function(r){
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      return r.text();
+    }).then(function(txt){
+      if(txt&&txt.length>10)parse(txt,'日常监控数据源_2026.csv（自动｜无收入列）');
+      else throw new Error('empty');
+    });
+  }).catch(function(){
+    info.textContent='未加载数据（请点击「导入」选择 CSV，或以本地服务器方式打开）';showLoadBanner();
+  });
+}
+document.addEventListener('DOMContentLoaded',function(){
+  if(!checkLibs())return;
+  Chart.register(ChartDataLabels);
+  // 提高图表 canvas 渲染像素比：普通屏(dpr=1)也至少按 2 倍像素绘制，避免放大/截图后发虚。
+  // 仅影响清晰度，不改变布局尺寸（Chart.js 按 CSS 尺寸自适应，内部像素翻倍）。
+  Chart.defaults.devicePixelRatio = Math.max(2, window.devicePixelRatio || 1);
+  // 自动设置日期范围为当前周（周一~周日）
+  setWeekDateRange();
+  document.getElementById('importBtn').addEventListener('click',function(){document.getElementById('fileInput').click()});
+  document.getElementById('fileInput').addEventListener('change',function(e){
+    const file=e.target.files[0];if(!file)return;
+    const info=document.getElementById('dataInfo');
+    const isCsv=/\.csv$/i.test(file.name);
+    info.textContent='正在读取「'+file.name+'」('+(file.size/1048576).toFixed(0)+'MB)…';
+    const reader=new FileReader();
+    reader.onerror=function(){alert('文件读取失败，请重试或更换文件');info.textContent='未加载数据'};
+    if(isCsv)reader.readAsText(file);else reader.readAsArrayBuffer(file);
+    reader.onload=function(evt){
+      info.textContent='正在解析数据，请勿关闭页面…';
+      // 先让浏览器渲染提示，再执行可能耗时数十秒的同步解析（大文件会卡住 UI，属正常）
+      setTimeout(function(){try{
+        const bytes=isCsv?evt.target.result:new Uint8Array(evt.target.result);
+        const t0=Date.now();
+        const arr=parseExcel(bytes,isCsv?'string':'array');
+        applyRawData(arr,file.name);
+        document.getElementById('dataInfo').textContent=arr.length+' 条记录已加载（'+((Date.now()-t0)/1000).toFixed(1)+'s）';
+      }catch(err){alert('解析失败: '+err.message);console.error(err);info.textContent='未加载数据'}},30);
+    };
+  });
+  // 筛选栏 select 升级为可搜索下拉；日期输入框保持原生（内部 change 由 select 触发）
+  document.querySelectorAll('#filterBar select').forEach(makeSearchable);
+  document.querySelectorAll('#filterBar select, #filterBar input[type="date"]').forEach(function(el){el.addEventListener('change',applyFilters)});
+  syncCombos();
+  // TAB 切换：运营监控 / 运营分析
+  document.querySelectorAll('.tab-btn').forEach(function(b){b.addEventListener('click',function(){switchTab(b.dataset.tab)})});
+  const adp=document.getElementById('hmAdp95Period');
+  if(adp)adp.addEventListener('click',function(e){
+    const t=e.target.closest('[data-path]');if(!t)return;
+    const p=t.getAttribute('data-path');
+    if(adp95Expanded.has(p))adp95Expanded.delete(p);else adp95Expanded.add(p);
+    drawAdp95Period();
+  });
+  const rhdp=document.getElementById('hmRhdRevPeriod');
+  if(rhdp)rhdp.addEventListener('click',function(e){
+    const t=e.target.closest('[data-path]');if(!t)return;
+    const p=t.getAttribute('data-path');
+    if(rdpExpanded.has(p))rdpExpanded.delete(p);else rdpExpanded.add(p);
+    drawRegionDestPeriod();
+  });
+  // 目的大区 × 周期 单票收入/派送成本/A毛利：三级下拆点击展开
+  ['hmRev','hmCost','hmPg'].forEach(function(cid){
+    const el=document.getElementById(cid);
+    if(el)el.addEventListener('click',function(e){
+      const t=e.target.closest('[data-path]');if(!t)return;
+      const p=t.getAttribute('data-path');
+      if(ddpExpanded.has(p))ddpExpanded.delete(p);else ddpExpanded.add(p);
+      drawDestDrill(cid, cid==='hmRev'?'rev':(cid==='hmCost'?'cost':'pg'));
+    });
+  });
+  // ===== 生成长截图按钮（依赖 libs/html2canvas.min.js）=====
+  // 将当前整页（含全部 Chart.js canvas 与 HTML 热力图）渲染为 PNG 并触发浏览器下载，
+  // 文件名自动带上当前维度 / 周期 / 日期区间，便于区分不同筛选条件下的截图。
+  const shotBtn=document.getElementById('shotBtn');
+  if(shotBtn){
+    shotBtn.addEventListener('click',function(){
+      if(typeof html2canvas!=='function'){alert('截图库未加载（libs/html2canvas.min.js）');return;}
+      const btn=shotBtn,old=btn.textContent;btn.disabled=true;btn.textContent='生成中…';
+      const pt=document.getElementById('weekTriggerText');
+      const ds=document.getElementById('filterDateStart').value||'始';
+      const de=document.getElementById('filterDateEnd').value||'末';
+      const tag=(viewMode==='week'?'W':(viewMode==='day'?'D':'M'))+'_'+(pt?pt.textContent:'全部')+'_'+ds+'~'+de;
+      try{
+        // 导出为 JPEG（quality 0.9）+ 倍率 2：在保证可读清晰度的同时，把长截图体积
+        // 压到飞书图片消息可发送范围（远小于 PNG/高倍率），避免文件过大发不出。
+        html2canvas(document.body,{scale:Math.max(2,window.devicePixelRatio||1),backgroundColor:'#f0f2f5',
+          windowWidth:document.documentElement.scrollWidth,useCORS:true,logging:false})
+          .then(function(canvas){
+            canvas.toBlob(function(blob){
+              const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+              a.download='看板长截图_'+tag+'.jpg';document.body.appendChild(a);a.click();document.body.removeChild(a);
+              setTimeout(function(){URL.revokeObjectURL(a.href);},1000);
+              btn.disabled=false;btn.textContent=old;
+            },'image/png');
+          },function(err){alert('截图失败: '+(err&&err.message||err));btn.disabled=false;btn.textContent=old;});
+      }catch(e){alert('截图异常: '+e.message);btn.disabled=false;btn.textContent=old;}
+    });
+  }
+  // 周/月 维度切换：切换时清空两种选择集并重建下拉、重算
+  document.querySelectorAll('#modeToggle .mode-btn').forEach(function(btn){
+    btn.addEventListener('click',function(){
+      const m=btn.dataset.mode;
+      if(m===viewMode)return;
+      viewMode=m;
+      ALL_PERIODS=getPeriods(rawData);    // 维度已切换，周期列表需重算并刷新缓存
+      selectedWeeks.clear();selectedMonths.clear();selectedDays.clear();
+      document.querySelectorAll('#modeToggle .mode-btn').forEach(function(b){b.classList.toggle('active',b.dataset.mode===m)});
+      const lbl=document.getElementById('periodLabel');
+      if(lbl)lbl.textContent=(m==='week'?'周次（可多选）':(m==='day'?'日期（可多选）':'月份（可多选）'));
+      calcPartial();
+      calcPeriodCoverage();
+      buildPeriodDropdown();
+      applyFilters();
+    });
+  });
+  autoLoad();
+});
+</script>
+</body>
+</html>
