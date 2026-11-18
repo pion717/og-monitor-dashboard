@@ -326,9 +326,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei
 <div class="kpi-card"><div class="kpi-label">本区揽派</div><div class="kpi-value" id="mtLocal">--<span class="unit">单/天</span></div><div class="kpi-change" id="mtLocalChange">--</div><div class="kpi-sub">本区运单去重数 / 本区出现天数</div></div>
 <div class="kpi-card"><div class="kpi-label">跨区比例</div><div class="kpi-value" id="mtCrossRatio">--<span class="unit">%</span></div><div class="kpi-change" id="mtCrossRatioChange">--</div><div class="kpi-sub">跨区去重订单数 ÷ (跨区+本区去重订单数)</div></div>
 </div>
-  <div class="section-title">一、单量趋势（发件大区 / 客户前10 / 重量段 / 货型）</div>
+  <div class="section-title">一、单量趋势（发件大区 / 目的大区 / 客户前10 / 重量段 / 货型）</div>
   <div class="charts-row">
     <div class="chart-card chart-card-full"><h3><span class="hm-title">发件大区 × 周期 日均单量热力图</span><span id="hmRegionWow" class="hm-wow"></span></h3><div class="hm-subtitle">行=发件大区，列=周期；日均单量=运单去重数÷天数去重；每格下排=占当周期单量比重；单元格右上红/绿角标=日均单量绝对值环比，右下蓝/橙小角标=该格占当周总量比重的环比(单位：百分点)。</div><div id="hmRegion"></div></div>
+  </div>
+  <div class="charts-row">
+    <div class="chart-card chart-card-full"><h3><span class="hm-title">目的大区 × 周期 日均单量热力图</span><span id="hmDestRegionWow" class="hm-wow"></span></h3><div class="hm-subtitle">行=目的大区，列=周期；日均单量=运单去重数÷天数去重；每格下排=占当周期单量比重；单元格右上红/绿角标=日均单量绝对值环比，右下蓝/橙小角标=该格占当周总量比重的环比(单位：百分点)。</div><div id="hmDestRegion"></div></div>
   </div>
   <div class="charts-row">
     <div class="chart-card chart-card-full"><h3><span class="hm-title">客户前10 × 周期 日均单量热力图</span><span id="hmCustWow" class="hm-wow"></span></h3><div class="hm-subtitle">行=客户前10（按全周期单量降序），列=周期；日均单量=运单去重数÷天数去重；单元格右上红/绿角标=日均单量绝对值环比，右下蓝/橙小角标=该格占当周总量比重的环比(单位：百分点)。</div><div id="hmCust"></div></div>
@@ -1180,6 +1183,7 @@ function computeMeetingAgg(){
   const cargoOf=function(r){return r['超尺寸']||'普货';};
   const blankAcc=function(){return {os:new Set(),ds:new Set(),tri:0,oRev:0,trc:0,oCost:0,triB:0,trcB:0,nB:0,tw:0,nw:0,tv:0,nv:0,tz:0,nz:0,cs:new Set(),cds:new Set(),ls:new Set(),lds:new Set()};};
   const stores={region:{cell:{},col:{},row:{},gwb:new Set(),gd:new Set()},
+                dreg:{cell:{},col:{},row:{},gwb:new Set(),gd:new Set()},
                 cust:{cell:{},col:{},row:{},gwb:new Set(),gd:new Set()},
                 wseg:{cell:{},col:{},row:{},gwb:new Set(),gd:new Set()},
                 cargo:{cell:{},col:{},row:{},gwb:new Set(),gd:new Set()}};
@@ -1209,6 +1213,7 @@ function computeMeetingAgg(){
     addCount(stores.cargo,car);
     if(reg){let a=regAcc[reg][i]; if(!a){a=blankAcc();regAcc[reg][i]=a;} accumulate(a,r,oid,dstr);}
     const dre=(r['目的大区']||'').toString().trim();
+    if(dre)addCount(stores.dreg,dre);
     if(dre){let a=regAccD[dre][i]; if(!a){a=blankAcc();regAccD[dre][i]=a;} accumulate(a,r,oid,dstr);}
     if(hasRevenue){const rv=parseFloat(r[COL_REV]); if(oid&&!isNaN(rv)){const k=cu+'|'+i,e=custRev[k]||(custRev[k]={tri:0,oRev:0}); e.tri+=rv; e.oRev++; periodRevTotal[i]+=rv;}}
   });
@@ -1260,6 +1265,7 @@ function computeMeetingAgg(){
   const cargoCats=['OS','AHS-W','AHS-H','普货'].filter(function(c){return stores.cargo.row[c];});
 
   const hmRegion=countMatrix(stores.region,REGS);
+  const hmDestRegion=countMatrix(stores.dreg,REGS_D);
   const hmCust=countMatrix(stores.cust,topCust);
   const hmWseg=countMatrix(stores.wseg,wsegCats);
   const hmCargo=countMatrix(stores.cargo,cargoCats);
@@ -1292,7 +1298,7 @@ function computeMeetingAgg(){
   const hmCustRev=valAggCats(topCust,custRevM);
   const hmCustShare=valAggCats(topCust,custShareM);
 
-  _meetAgg={plL:plL,hmRegion:hmRegion,hmCust:hmCust,hmWseg:hmWseg,hmCargo:hmCargo,hmCargoShare:hmCargoShare,
+  _meetAgg={plL:plL,hmRegion:hmRegion,hmDestRegion:hmDestRegion,hmCust:hmCust,hmWseg:hmWseg,hmCargo:hmCargo,hmCargoShare:hmCargoShare,
     hmWeight:hmWeight,hmVol:hmVol,hmZone:hmZone,hmCross:hmCross,hmRev:hmRev,hmCost:hmCost,hmPg:hmPg,hmGmRate:hmGmRate,hmCostRatio:hmCostRatio,
     hmWeightD:hmWeightD,hmVolD:hmVolD,hmZoneD:hmZoneD,hmCrossD:hmCrossD,hmRevD:hmRevD,hmCostD:hmCostD,hmPgD:hmPgD,hmGmRateD:hmGmRateD,hmCostRatioD:hmCostRatioD,
     hmCustRev:hmCustRev,hmCustShare:hmCustShare};
@@ -1304,6 +1310,7 @@ function renderMeeting(){
   renderScopeKpis();
   // 模块一：单量趋势（计数热力图，含占比子标签）
   drawHM('hmRegion','hmRegionWow',A.hmRegion,{count:true,corner:'发件大区＼周期',fmt:function(v){return v.toFixed(1);},wow:'日均单量(单/天)'});
+  drawHM('hmDestRegion','hmDestRegionWow',A.hmDestRegion,{count:true,corner:'目的大区＼周期',fmt:function(v){return v.toFixed(1);},wow:'日均单量(单/天)'});
   drawHM('hmCust','hmCustWow',A.hmCust,{count:true,corner:'客户＼周期',fmt:function(v){return v.toFixed(1);},wow:'日均单量(单/天)'});
   drawHM('hmWseg','hmWsegWow',A.hmWseg,{count:true,corner:'重量段＼周期',fmt:function(v){return v.toFixed(1);},wow:'日均单量(单/天)'});
   drawHM('hmCargo','hmCargoWow',A.hmCargoShare,{count:false,corner:'货型＼周期',fmt:function(v){return v.toFixed(1)+'%';},wow:'占比总单量(%)'});
