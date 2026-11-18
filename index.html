@@ -2419,7 +2419,7 @@ function showLoadBanner(){
   const b=document.getElementById('autoBanner');
   if(!b)return;
   b.style.display='block';
-  b.innerHTML='本站点为纯前端看板，<b>不含数据源</b>。请点击上方「<b>导入 Excel 数据</b>」按钮，选择本地 CSV / XLSX 数据文件上传（建议使用 23 列含收入列的合并数据源，如 <code>日常监控数据源_2026_含收入.csv</code>），上传解析完成后即可查看全部图表。';
+  b.innerHTML='未能自动加载默认数据源（可能是以 <code>file://</code> 方式双击打开，浏览器禁止读取本地文件）。两种解决方式：① 在该目录运行 <code>python3 -m http.server 8000</code> 后访问 <code>http://localhost:8000/常量监控.html</code>（推荐，始终读取最新 CSV）；② 直接点击上方「导入 Excel 数据」手动选择 CSV。';
 }
 /* 打开即自动加载默认数据源：通过 fetch 读取合并后的 CSV（需以本地 http 服务打开）。
    数据规模约 140 万行 / 250MB，无法内联为 data.js，故 file:// 双击方式不自动加载，
@@ -2560,7 +2560,7 @@ document.addEventListener('DOMContentLoaded',function(){
       applyFilters();
     });
   });
-  showLoadBanner();
+  autoLoad();
 });
 </script>
 </body>
