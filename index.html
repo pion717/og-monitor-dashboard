@@ -2419,10 +2419,14 @@ function showLoadBanner(){
   const b=document.getElementById('autoBanner');
   if(!b)return;
   b.style.display='block';
-  b.innerHTML='未能自动加载默认数据源（可能是以 <code>file://</code> 方式双击打开，浏览器禁止读取本地文件）。两种解决方式：① 在该目录运行 <code>python3 -m http.server 8000</code> 后访问 <code>http://localhost:8000/常量监控.html</code>（推荐，始终读取最新 CSV）；② 直接点击上方「导入 Excel 数据」手动选择 CSV。';
+  if(location.protocol==='file:'){
+    b.innerHTML='未能自动加载默认数据源（以 <code>file://</code> 方式打开时浏览器禁止读取本地文件）。两种解决方式：① 在该目录运行 <code>python3 -m http.server 8000</code> 后访问 <code>http://localhost:8000/常量监控.html</code>（推荐，始终读取最新 CSV）；② 直接点击上方「导入 Excel 数据」手动选择 CSV。';
+  }else{
+    b.innerHTML='本页是<b>内部工具</b>的展示壳，<b>不含任何数据</b>。完整功能请用本地数据目录的 <code>start_server.command</code> 打开；如要在本页试用，可点上方「导入 Excel 数据」选择本地 CSV（需含 周次 / 发件大区 / 目的大区 / 客户简称 / OG首次签入时间(年-月-日) 等表头）。';
+  }
 }
 /* 打开即自动加载默认数据源：通过 fetch 读取合并后的 CSV（需以本地 http 服务打开）。
-   数据规模约 140 万行 / 250MB，无法内联为 data.js，故 file:// 双击方式不自动加载，
+   数据规模约 2,072,450 行 / 473MB，无法内联为 data.js，故 file:// 双击方式不自动加载，
    此时显示引导横幅，用户可点「导入」手动选择 CSV。 */
 function autoLoad(){
   const info=document.getElementById('dataInfo');
