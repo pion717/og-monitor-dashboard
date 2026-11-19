@@ -246,7 +246,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei
 </div>
 <div id="panel-monitor" class="tab-panel">
 <div class="kpi-grid">
-<div class="kpi-card"><div class="kpi-label">日均单量</div><div class="kpi-value" id="kpiOrder">--<span class="unit">单/天</span></div><div class="kpi-change" id="kpiOrderChange">--</div><div class="kpi-sub">运单去重数 / 天数去重</div></div>
+<div class="kpi-card"><div class="kpi-label">日均单量</div><div class="kpi-value" id="kpiOrder">--<span class="unit">单/天</span></div><div class="kpi-change" id="kpiOrderChange">--</div><div class="kpi-sub">所选范围：运单去重数 ÷ 天数去重</div></div>
 <div class="kpi-card"><div class="kpi-label">平均重量</div><div class="kpi-value" id="kpiWeight">--<span class="unit">lb</span></div><div class="kpi-change" id="kpiWeightChange">--</div><div class="kpi-sub">总重量 / 有重量值的订单数</div></div>
 <div class="kpi-card"><div class="kpi-label">平均体积</div><div class="kpi-value" id="kpiVolume">--<span class="unit">m³</span></div><div class="kpi-change" id="kpiVolumeChange">--</div><div class="kpi-sub">总体积 / 有体积值的订单数</div></div>
 <div class="kpi-card"><div class="kpi-label">平均ZONE</div><div class="kpi-value" id="kpiZone">--<span class="unit"></span></div><div class="kpi-change" id="kpiZoneChange">--</div><div class="kpi-sub">ZONE合计 / 有ZONE值的订单数</div></div>
@@ -317,7 +317,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei
 </div>
 <div id="panel-meeting" class="tab-panel" style="display:none">
 <div class="kpi-grid">
-<div class="kpi-card"><div class="kpi-label">日均单量</div><div class="kpi-value" id="mtOrder">--<span class="unit">单/天</span></div><div class="kpi-change" id="mtOrderChange">--</div><div class="kpi-sub">运单去重数 / 天数去重</div></div>
+<div class="kpi-card"><div class="kpi-label">日均单量</div><div class="kpi-value" id="mtOrder">--<span class="unit">单/天</span></div><div class="kpi-change" id="mtOrderChange">--</div><div class="kpi-sub">所选范围：运单去重数 ÷ 天数去重</div></div>
 <div class="kpi-card"><div class="kpi-label">平均重量</div><div class="kpi-value" id="mtWeight">--<span class="unit">lb</span></div><div class="kpi-change" id="mtWeightChange">--</div><div class="kpi-sub">总重量 / 有重量值的订单数</div></div>
 <div class="kpi-card"><div class="kpi-label">平均体积</div><div class="kpi-value" id="mtVolume">--<span class="unit">m³</span></div><div class="kpi-change" id="mtVolumeChange">--</div><div class="kpi-sub">总体积 / 有体积值的订单数</div></div>
 <div class="kpi-card"><div class="kpi-label">平均ZONE</div><div class="kpi-value" id="mtZone">--<span class="unit"></span></div><div class="kpi-change" id="mtZoneChange">--</div><div class="kpi-sub">ZONE合计 / 有ZONE值的订单数</div></div>
@@ -1067,7 +1067,7 @@ function renderBrief(cur,prv,data,prevData){
    避免每次勾选都重新聚合 168 万行。 */
 /* ===================== 运营分析 TAB ===================== */
 /* 聚合缓存：数据/筛选未变时复用，避免每次切换 TAB 都重算 170 万行 */
-let _meetAgg=null,_meetRef=null;
+let _meetAgg=null,_meetRef=null,_meetTrunc={truncated:false,periodTotal:0};
 /* 通用热力图渲染：行=分类、列=周期，每格显示数值并按色阶着色。
    opt.count=true 时单元格=日均单量，下排同时显示「占当周期比重」(与运营监控热力图一致)；
    opt.count=false 时单元格=任意指标值，颜色按 min~max 线性映射，无占比子标签。
@@ -1149,6 +1149,13 @@ function drawHM(containerId,wowId,m,opt){
   }
   html+='</div>';
   container.innerHTML=html;
+  // 日维度截断角标：独立节点，不占用 wow 槽（wow 承载环比/静态指标名）；文案与结构图角标字面一致
+  if(_meetTrunc.truncated){
+    const cap=document.createElement('div');
+    cap.className='hm-wow flat';cap.setAttribute('data-daycap','1');
+    cap.textContent='日维度：共 '+_meetTrunc.periodTotal+' 天，仅展示最近 30 天（切回周/月看完整时间轴）';
+    container.appendChild(cap);
+  }
   // 表头角标：最新周期 vs 上一周期 的环比（与运营监控 hmWow 同口径）
   if(wow){
     wow.className='hm-wow';wow.textContent='';
@@ -1173,10 +1180,24 @@ function drawLineMatrix(canvasId,wowId,m,unit,full){
     if(m.grand!=null){wow.textContent='全局 '+m.grand.toFixed(1)+unit;wow.className='hm-wow flat';}
     else{wow.textContent='';wow.className='hm-wow';}
   }
+  // 日维度截断角标：幂等三态（真截断=有则改文本/无则插入；非截断=有则移除）。canvas 从不被移除，故必须显式清理，避免日→周残留
+  const cv=document.getElementById(canvasId);
+  if(cv&&cv.parentNode){
+    let cap=cv.parentNode.querySelector('[data-daycap]');
+    if(_meetTrunc.truncated){
+      const txt='日维度：共 '+_meetTrunc.periodTotal+' 天，仅展示最近 30 天（切回周/月看完整时间轴）';
+      if(cap)cap.textContent=txt;
+      else{cap=document.createElement('div');cap.className='hm-wow flat';cap.setAttribute('data-daycap','1');cap.textContent=txt;cv.parentNode.appendChild(cap);}
+    }else if(cap){cap.parentNode.removeChild(cap);}
+  }
 }
 function computeMeetingAgg(){
   if(_meetRef===filteredData&&_meetAgg)return _meetAgg;
-  const pl=getPeriods(filteredData); if(!pl.length)return null;
+  let pl=getPeriods(filteredData); if(!pl.length)return null;
+  // 日维度周期过多（如 321 天）时截到最近 30 天，与运营监控结构图同口径；记录原始天数供角标使用（纯 additive，不碰聚合累加器）
+  _meetTrunc.periodTotal=pl.length;
+  _meetTrunc.truncated=(viewMode==='day'&&pl.length>30);
+  if(_meetTrunc.truncated)pl=pl.slice(-30);
   const P=pl.length,pidx={}; pl.forEach(function(p,i){pidx[p]=i});
   const plL=pl.map(pLabel);
 
