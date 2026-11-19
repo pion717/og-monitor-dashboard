@@ -1253,8 +1253,12 @@ function computeMeetingAgg(){
       if(e&&e.wb.size&&tot&&tot.wb.size) return +(e.wb.size/tot.wb.size*100).toFixed(1);
       return null;});});
     const col=pl.map(function(){return null;});
-    const row=cats.map(function(c,i){let s=0,n=0;for(let j=0;j<pl.length;j++)if(cell[i][j]!=null){s+=cell[i][j];n++;}return n?s/n:null;});
-    let s=0,n=0;cell.forEach(function(rr){rr.forEach(function(v){if(v!=null){s+=v;n++;}});});const grand=n?s/n:null;
+    // 行合计改为订单加权：Σ各周期该货型去重单 ÷ Σ各周期总去重单，与顶部占比口径一致。
+    // grand 恒等 100%（各货型占比之和本就是 100%），置 null 避免显示无信息量且随重建漂移的数。
+    const row=cats.map(function(c){let num=0,den=0;
+      for(let j=0;j<pl.length;j++){const e=st.cell[c+'|'+j],tot=st.col[j];if(e&&tot){num+=e.wb.size;den+=tot.wb.size;}}
+      return den?+(num/den*100).toFixed(1):null;});
+    const grand=null;
     return {cats:cats,cols:plL,cell:cell,col:col,row:row,grand:grand};
   }
 
@@ -1277,26 +1281,63 @@ function computeMeetingAgg(){
   function valMatrixD(field,dec){
     return REGS_D.map(function(rg){return pl.map(function(p,i){const m=metricFromAcc(regAccD[rg][i]);return (m&&m[field]!=null)?+m[field].toFixed(dec):null;});});
   }
-  function valAggCats(cats,m){
+  // 加权总计：各指标用自身分母从原始累加器跨行求和再相除（与顶部 KPI 同算法）。
+  // 注意：cr/gm/ccr 的单元格是百分比(×100)，故 FAGG 分子同步 ×100，单位才能与单元格一致。
+  const FAGG={
+    aw:a=>a.nw?[a.tw,a.nw]:null,
+    av:a=>a.nv?[a.tv,a.nv]:null,
+    az:a=>a.nz?[a.tz,a.nz]:null,
+    cr:a=>(a.cs.size+a.ls.size)?[a.cs.size*100,a.cs.size+a.ls.size]:null,
+    pr:a=>a.oRev?[a.tri,a.oRev]:null,
+    pc:a=>a.oCost?[a.trc,a.oCost]:null,
+    pg:a=>a.nB?[a.triB-a.trcB,a.nB]:null,
+    gm:a=>a.triB?[(a.triB-a.trcB)*100,a.triB]:null,
+    ccr:a=>a.tri?[a.trc*100,a.tri]:null
+  };
+  function ratioOf(list,f){let n=0,d=0,ok=false;
+    list.forEach(function(a){if(!a)return;const p=f(a);if(!p)return;n+=p[0];d+=p[1];ok=true;});
+    return (ok&&d)?n/d:null;}
+  function valAggCats(cats,m,opt){
+    // 客户收入占比：分母是各周期全局收入 periodRevTotal[j]，每周期只取一次，不能按行累加。
+    if(opt&&opt.fkey==='share'&&opt.share&&opt.acc){
+      const tot=opt.share,acc=opt.acc;
+      const col=pl.map(function(p,j){const t=tot(j);if(!t)return null;let s=0,ok=false;
+        cats.forEach(function(c){const a=acc(c,j);if(a){s+=a.tri;ok=true;}});return ok?s/t*100:null;});
+      let allTot=0;for(let j=0;j<pl.length;j++)allTot+=tot(j);
+      const row=cats.map(function(c){let v=0;for(let j=0;j<pl.length;j++){const a=acc(c,j);if(a)v+=a.tri;}return allTot?v/allTot*100:null;});
+      return {cats:cats,cols:plL,cell:m,col:col,row:row,grand:null};
+    }
+    const f=opt&&FAGG[opt.fkey];
+    if(f&&opt.acc){
+      const acc=opt.acc;
+      const col=pl.map(function(p,j){return ratioOf(cats.map(function(c){return acc(c,j);}),f);});
+      const row=cats.map(function(c){return ratioOf(pl.map(function(p,j){return acc(c,j);}),f);});
+      const all=[];cats.forEach(function(c){for(let j=0;j<pl.length;j++)all.push(acc(c,j));});
+      return {cats:cats,cols:plL,cell:m,col:col,row:row,grand:ratioOf(all,f)};
+    }
+    // 不传 opt 时退回原等权逻辑（兼容未改到的调用点，行为不变）
     const col=pl.map(function(p,j){let s=0,n=0;for(let i=0;i<cats.length;i++)if(m[i][j]!=null){s+=m[i][j];n++;}return n?s/n:null;});
     const row=cats.map(function(cc,i){let s=0,n=0;for(let j=0;j<pl.length;j++)if(m[i][j]!=null){s+=m[i][j];n++;}return n?s/n:null;});
     let s=0,n=0;m.forEach(function(rr){rr.forEach(function(v){if(v!=null){s+=v;n++;}});});const grand=n?s/n:null;
     return {cats:cats,cols:plL,cell:m,col:col,row:row,grand:grand};
   }
   const regVal={aw:valMatrix('aw',2),av:valMatrix('av',4),az:valMatrix('az',2),cr:valMatrix('cr',1),pr:valMatrix('pr',2),pc:valMatrix('pc',2),pg:valMatrix('pg',2),gm:valMatrix('gm',1),ccr:valMatrix('ccr',2)};
-  const hmWeight=valAggCats(REGS,regVal.aw),hmVol=valAggCats(REGS,regVal.av),hmZone=valAggCats(REGS,regVal.az),
-        hmCross=valAggCats(REGS,regVal.cr),hmRev=valAggCats(REGS,regVal.pr),hmCost=valAggCats(REGS,regVal.pc),
-        hmPg=valAggCats(REGS,regVal.pg),hmGmRate=valAggCats(REGS,regVal.gm),hmCostRatio=valAggCats(REGS,regVal.ccr);
+  const regAccOf=function(c,j){return regAcc[c][j];};
+  const hmWeight=valAggCats(REGS,regVal.aw,{fkey:'aw',acc:regAccOf}),hmVol=valAggCats(REGS,regVal.av,{fkey:'av',acc:regAccOf}),hmZone=valAggCats(REGS,regVal.az,{fkey:'az',acc:regAccOf}),
+        hmCross=valAggCats(REGS,regVal.cr,{fkey:'cr',acc:regAccOf}),hmRev=valAggCats(REGS,regVal.pr,{fkey:'pr',acc:regAccOf}),hmCost=valAggCats(REGS,regVal.pc,{fkey:'pc',acc:regAccOf}),
+        hmPg=valAggCats(REGS,regVal.pg,{fkey:'pg',acc:regAccOf}),hmGmRate=valAggCats(REGS,regVal.gm,{fkey:'gm',acc:regAccOf}),hmCostRatio=valAggCats(REGS,regVal.ccr,{fkey:'ccr',acc:regAccOf});
   // 目的大区版经营矩阵（模块四改用）：聚合口径与发件大区完全一致，仅分组键换成 r['目的大区']
   const regValD={aw:valMatrixD('aw',2),av:valMatrixD('av',4),az:valMatrixD('az',2),cr:valMatrixD('cr',1),pr:valMatrixD('pr',2),pc:valMatrixD('pc',2),pg:valMatrixD('pg',2),gm:valMatrixD('gm',1),ccr:valMatrixD('ccr',2)};
-  const hmWeightD=valAggCats(REGS_D,regValD.aw),hmVolD=valAggCats(REGS_D,regValD.av),hmZoneD=valAggCats(REGS_D,regValD.az),
-        hmCrossD=valAggCats(REGS_D,regValD.cr),hmRevD=valAggCats(REGS_D,regValD.pr),hmCostD=valAggCats(REGS_D,regValD.pc),
-        hmPgD=valAggCats(REGS_D,regValD.pg),hmGmRateD=valAggCats(REGS_D,regValD.gm),hmCostRatioD=valAggCats(REGS_D,regValD.ccr);
+  const regAccDOf=function(c,j){return regAccD[c][j];};
+  const hmWeightD=valAggCats(REGS_D,regValD.aw,{fkey:'aw',acc:regAccDOf}),hmVolD=valAggCats(REGS_D,regValD.av,{fkey:'av',acc:regAccDOf}),hmZoneD=valAggCats(REGS_D,regValD.az,{fkey:'az',acc:regAccDOf}),
+        hmCrossD=valAggCats(REGS_D,regValD.cr,{fkey:'cr',acc:regAccDOf}),hmRevD=valAggCats(REGS_D,regValD.pr,{fkey:'pr',acc:regAccDOf}),hmCostD=valAggCats(REGS_D,regValD.pc,{fkey:'pc',acc:regAccDOf}),
+        hmPgD=valAggCats(REGS_D,regValD.pg,{fkey:'pg',acc:regAccDOf}),hmGmRateD=valAggCats(REGS_D,regValD.gm,{fkey:'gm',acc:regAccDOf}),hmCostRatioD=valAggCats(REGS_D,regValD.ccr,{fkey:'ccr',acc:regAccDOf});
 
   const custRevM=topCust.map(function(cu){return pl.map(function(p,i){const e=custRev[cu+'|'+i];return (e&&e.oRev)?+(e.tri/e.oRev).toFixed(2):null;});});
   const custShareM=topCust.map(function(cu){return pl.map(function(p,i){const tot=periodRevTotal[i],e=custRev[cu+'|'+i];return (tot&&e)?+(e.tri/tot*100).toFixed(1):null;});});
-  const hmCustRev=valAggCats(topCust,custRevM);
-  const hmCustShare=valAggCats(topCust,custShareM);
+  const custAccOf=function(c,j){return custRev[c+'|'+j];};
+  const hmCustRev=valAggCats(topCust,custRevM,{fkey:'pr',acc:custAccOf});
+  const hmCustShare=valAggCats(topCust,custShareM,{fkey:'share',acc:custAccOf,share:function(j){return periodRevTotal[j];}});
 
   _meetAgg={plL:plL,hmRegion:hmRegion,hmDestRegion:hmDestRegion,hmCust:hmCust,hmWseg:hmWseg,hmCargo:hmCargo,hmCargoShare:hmCargoShare,
     hmWeight:hmWeight,hmVol:hmVol,hmZone:hmZone,hmCross:hmCross,hmRev:hmRev,hmCost:hmCost,hmPg:hmPg,hmGmRate:hmGmRate,hmCostRatio:hmCostRatio,
