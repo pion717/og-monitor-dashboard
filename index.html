@@ -1153,7 +1153,7 @@ function drawHM(containerId,wowId,m,opt){
   if(_meetTrunc.truncated){
     const cap=document.createElement('div');
     cap.className='hm-wow flat';cap.setAttribute('data-daycap','1');
-    cap.textContent='日维度：共 '+_meetTrunc.periodTotal+' 天，仅展示最近 30 天（切回周/月看完整时间轴）';
+    cap.textContent='日维度：共 '+_meetTrunc.periodTotal+' 天，仅展示最近 30 天（切回周/月看完整时间轴）；合计/徽标为这 30 天口径，顶部 KPI 为所选范围口径';
     container.appendChild(cap);
   }
   // 表头角标：最新周期 vs 上一周期 的环比（与运营监控 hmWow 同口径）
@@ -1185,7 +1185,7 @@ function drawLineMatrix(canvasId,wowId,m,unit,full){
   if(cv&&cv.parentNode){
     let cap=cv.parentNode.querySelector('[data-daycap]');
     if(_meetTrunc.truncated){
-      const txt='日维度：共 '+_meetTrunc.periodTotal+' 天，仅展示最近 30 天（切回周/月看完整时间轴）';
+      const txt='日维度：共 '+_meetTrunc.periodTotal+' 天，仅展示最近 30 天（切回周/月看完整时间轴）；合计/徽标为这 30 天口径，顶部 KPI 为所选范围口径';
       if(cap)cap.textContent=txt;
       else{cap=document.createElement('div');cap.className='hm-wow flat';cap.setAttribute('data-daycap','1');cap.textContent=txt;cv.parentNode.appendChild(cap);}
     }else if(cap){cap.parentNode.removeChild(cap);}
