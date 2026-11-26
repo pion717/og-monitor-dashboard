@@ -1175,7 +1175,7 @@ function drawLineMatrix(canvasId,wowId,m,unit,full){
     return {label:cat,color:REGION_COLORS[i%REGION_COLORS.length],lastIdx:full?null:m.cols.length-1,
       data:m.cell[i].map(function(v){return v==null?null:Math.round(v*100)/100;})};
   });
-  chartMulti(canvasId,m.cols,series,true,false,full?9:10);
+  chartMulti(canvasId,m.cols,series,true,false,full?9:10,m.covLow);
   if(wow){
     if(m.grand!=null){wow.textContent='全局 '+m.grand.toFixed(1)+unit;wow.className='hm-wow flat';}
     else{wow.textContent='';wow.className='hm-wow';}
@@ -1194,12 +1194,13 @@ function drawLineMatrix(canvasId,wowId,m,unit,full){
 function computeMeetingAgg(){
   if(_meetRef===filteredData&&_meetAgg)return _meetAgg;
   let pl=getPeriods(filteredData); if(!pl.length)return null;
-  // 日维度周期过多（如 321 天）时截到最近 30 天，与运营监控结构图同口径；记录原始天数供角标使用（纯 additive，不碰聚合累加器）
+  // 日维度周期过多（如 329 天）时截到最近 30 天，与运营监控结构图同口径；记录原始天数供角标使用（纯 additive，不碰聚合累加器）
   _meetTrunc.periodTotal=pl.length;
   _meetTrunc.truncated=(viewMode==='day'&&pl.length>30);
   if(_meetTrunc.truncated)pl=pl.slice(-30);
   const P=pl.length,pidx={}; pl.forEach(function(p,i){pidx[p]=i});
   const plL=pl.map(pLabel);
+  const covLowIdx=pl.map(function(p,i){return (PERIOD_COV[p]>=95)?null:i;}).filter(function(i){return i!==null;});
 
   const cargoOf=function(r){return r['超尺寸']||'普货';};
   const blankAcc=function(){return {os:new Set(),ds:new Set(),tri:0,oRev:0,trc:0,oCost:0,triB:0,trcB:0,nB:0,tw:0,nw:0,tv:0,nv:0,tz:0,nz:0,cs:new Set(),cds:new Set(),ls:new Set(),lds:new Set()};};
@@ -1215,7 +1216,8 @@ function computeMeetingAgg(){
   const custRev={}; const periodRevTotal=pl.map(function(){return 0;});
 
   filteredData.forEach(function(r){
-    const i=pidx[periodOf(r)]; if(i===undefined)return;
+    const per=periodOf(r),i=pidx[per]; if(i===undefined)return;
+    const covOk=PERIOD_COV[per]>=95;
     const oid=r._oid, dstr=r._dateStr;
     const reg=(r['发件大区']||'').toString().trim();
     const cu=((r['客户简称']||'').toString().trim())||'未标注';
@@ -1232,15 +1234,15 @@ function computeMeetingAgg(){
     if(cu)addCount(stores.cust,cu);
     if(ws)addCount(stores.wseg,ws);
     addCount(stores.cargo,car);
-    if(reg){let a=regAcc[reg][i]; if(!a){a=blankAcc();regAcc[reg][i]=a;} accumulate(a,r,oid,dstr);}
+    if(reg){let a=regAcc[reg][i]; if(!a){a=blankAcc();regAcc[reg][i]=a;} accumulate(a,r,oid,dstr,covOk);}
     const dre=(r['目的大区']||'').toString().trim();
     if(dre)addCount(stores.dreg,dre);
-    if(dre){let a=regAccD[dre][i]; if(!a){a=blankAcc();regAccD[dre][i]=a;} accumulate(a,r,oid,dstr);}
-    if(hasRevenue){const rv=parseFloat(r[COL_REV]); if(oid&&!isNaN(rv)){const k=cu+'|'+i,e=custRev[k]||(custRev[k]={tri:0,oRev:0}); e.tri+=rv; e.oRev++; periodRevTotal[i]+=rv;}}
+    if(dre){let a=regAccD[dre][i]; if(!a){a=blankAcc();regAccD[dre][i]=a;} accumulate(a,r,oid,dstr,covOk);}
+    if(covOk&&hasRevenue){const rv=parseFloat(r[COL_REV]); if(oid&&!isNaN(rv)){const k=cu+'|'+i,e=custRev[k]||(custRev[k]={tri:0,oRev:0}); e.tri+=rv; e.oRev++; periodRevTotal[i]+=rv;}}
   });
 
-  function accumulate(a,r,oid,dstr){
-    if(oid){ if(hasRevenue){const rv=parseFloat(r[COL_REV]);if(!isNaN(rv)){a.tri+=rv;a.oRev++;} const ct=parseFloat(r[COL_COST]);if(!isNaN(ct)){a.trc+=ct;a.oCost++;} if(!isNaN(rv)&&!isNaN(ct)){a.triB+=rv;a.trcB+=ct;a.nB++;}} a.os.add(oid);}
+  function accumulate(a,r,oid,dstr,covOk){
+    if(oid){ if(covOk&&hasRevenue){const rv=parseFloat(r[COL_REV]);if(!isNaN(rv)){a.tri+=rv;a.oRev++;} const ct=parseFloat(r[COL_COST]);if(!isNaN(ct)){a.trc+=ct;a.oCost++;} if(!isNaN(rv)&&!isNaN(ct)){a.triB+=rv;a.trcB+=ct;a.nB++;}} a.os.add(oid);}
     if(dstr)a.ds.add(dstr);
     const wv=parseFloat(r['重量(lb)']);if(!isNaN(wv)){a.tw+=wv;a.nw++;}
     const vv=parseFloat(r['体积(m³)']);if(!isNaN(vv)){a.tv+=vv;a.nv++;}
@@ -1364,6 +1366,7 @@ function computeMeetingAgg(){
     hmWeight:hmWeight,hmVol:hmVol,hmZone:hmZone,hmCross:hmCross,hmRev:hmRev,hmCost:hmCost,hmPg:hmPg,hmGmRate:hmGmRate,hmCostRatio:hmCostRatio,
     hmWeightD:hmWeightD,hmVolD:hmVolD,hmZoneD:hmZoneD,hmCrossD:hmCrossD,hmRevD:hmRevD,hmCostD:hmCostD,hmPgD:hmPgD,hmGmRateD:hmGmRateD,hmCostRatioD:hmCostRatioD,
     hmCustRev:hmCustRev,hmCustShare:hmCustShare};
+  hmGmRateD.covLow=covLowIdx; hmCostRatioD.covLow=covLowIdx;
   _meetRef=filteredData;
   return _meetAgg;
 }
@@ -1419,7 +1422,7 @@ function updCh(){
   const pidx={};pl.forEach(function(p,i){pidx[p]=i});
   const buckets=pl.map(function(){return []});
   filteredData.forEach(function(r){const i=pidx[periodOf(r)];if(i!==undefined)buckets[i].push(r)});
-  const wm={};pl.forEach(function(p,i){wm[p]=calc(buckets[i],true)});
+  const wm={};pl.forEach(function(p,i){wm[p]=calc(buckets[i],true);if(!(PERIOD_COV[p]>=95)){wm[p].pr=null;wm[p].pc=null;wm[p].pg=null;wm[p].gm=null;}});
   chart('chartOrderTrend',plL,pl.map(p=>wm[p]?.ao||0),'日均单量','#e67e22');
   // 各周期 A-D 时长趋势：拆分为 总计 / 跨区注入 / 本区揽派 三条折线
   chartMulti('chartDeliveryTrend',plL,[
@@ -1438,17 +1441,18 @@ function updCh(){
   ],true,false);
   drawCustomer();
   if(hasRevenue){
+    const covLow=pl.map(function(p,i){return (PERIOD_COV[p]>=95)?null:i;}).filter(function(i){return i!==null;});
     chartMulti('chartRevTrend',plL,[
       {label:'单票收入($)',data:pl.map(p=>wm[p]?wm[p].pr:0),color:'#1f6feb'},
       {label:'单票派送成本($)',data:pl.map(p=>wm[p]?wm[p].pc:0),color:'#e67e22'},
       {label:'单票A毛利($)',data:pl.map(p=>wm[p]?wm[p].pg:0),color:'#2e7d32'}
-    ],true);
+    ],true,undefined,undefined,covLow);
     chart('chartGmTrend',plL,pl.map(p=>wm[p]?wm[p].gm:0),'A毛利率(%)','#1f6feb');
     // 票均收入两张图：Y 轴不强制从 0 开始（各线集中在 13~20，从 0 起曲线被压平看不出差异）
     // 两张图均逐点标注数值（字号 8 减轻密集感；点数>50 时 chartMulti 自动退化为只标尾点）
-    const oa=regionRevAgg('发件大区',true); chartMulti('chartRevByOrigin',oa.pl.map(pLabel),oa.series,true,false,8);
+    const oa=regionRevAgg('发件大区',true); const covLowO=oa.pl.map(function(p,i){return (PERIOD_COV[p]>=95)?null:i;}).filter(function(i){return i!==null;}); chartMulti('chartRevByOrigin',oa.pl.map(pLabel),oa.series,true,false,8,covLowO);
     // 目的大区：每个数据点都标注数值（字号 8 减轻密集感）
-    const da=regionRevAgg('目的大区',true); chartMulti('chartRevByDest',da.pl.map(pLabel),da.series,true,false,8);
+    const da=regionRevAgg('目的大区',true); const covLowD=da.pl.map(function(p,i){return (PERIOD_COV[p]>=95)?null:i;}).filter(function(i){return i!==null;}); chartMulti('chartRevByDest',da.pl.map(pLabel),da.series,true,false,8,covLowD);
   }else{
     clearChart('chartRevTrend');clearChart('chartGmTrend');clearChart('chartRevByOrigin');clearChart('chartRevByDest');
   }
@@ -1495,7 +1499,7 @@ function chartH(id,labels,data,label,color,fmt){
    - zeroBased=false 时 Y 轴不强制从 0 开始（占比类指标用）
    - labelSize 可单独指定标签字号（全点标注时用小字号减轻密集感）
    注：lastIdx 用 ==null 判断，同时兼容 undefined 与 null（Chart.js 会把缺失的自定义属性归一化为 null） */
-function chartMulti(id,labels,series,showLabels,zeroBased,labelSize){
+function chartMulti(id,labels,series,showLabels,zeroBased,labelSize,covLow){
   if(chartInstances[id])chartInstances[id].destroy();
   const cv=document.getElementById(id);
   if(!cv)return;
@@ -1503,6 +1507,15 @@ function chartMulti(id,labels,series,showLabels,zeroBased,labelSize){
   if(!labels.length){ctx.clearRect(0,0,cv.width,cv.height);return}
   // 同上：点数过多时对未指定 lastIdx 的线也只标注尾点，避免逐点标注重叠
   const dense=labels.length>50;
+  const covPlugins=(covLow&&covLow.length)?[{id:'covLowBand',beforeDatasetsDraw:function(ch){
+    const ca=ch.chartArea;if(!ca)return;
+    const xs=covLow.map(function(i){return ch.scales.x.getPixelForValue(i);}).filter(function(x){return isFinite(x);});
+    if(!xs.length)return;
+    const ctx=ch.ctx;ctx.save();ctx.fillStyle='rgba(127,140,141,0.16)';
+    xs.forEach(function(x){const x0=Math.max(ca.left,x-9),x1=Math.min(ca.right,x+9);if(x1>x0)ctx.fillRect(x0,ca.top,x1-x0,ca.bottom-ca.top);});
+    ctx.fillStyle='#6c757d';ctx.font='10px sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';
+    ctx.fillText('覆盖率不足·不可横比',xs[0],ca.top-2);ctx.restore();
+  }}]:[];
   chartInstances[id]=new Chart(ctx,{type:'line',
     data:{labels:labels,datasets:series.map(function(s){return {label:s.label,data:s.data,lastIdx:s.lastIdx,dl:s.dl,borderColor:s.color,backgroundColor:s.color+'20',borderWidth:s.borderWidth||2,fill:false,tension:0.3,pointBackgroundColor:s.color,pointRadius:3,pointHoverRadius:5}})},
     options:{responsive:true,maintainAspectRatio:false,
@@ -1510,7 +1523,8 @@ function chartMulti(id,labels,series,showLabels,zeroBased,labelSize){
       interaction:{mode:'index',intersect:false},
       plugins:{legend:{display:true,position:'top',labels:{font:{size:11},boxWidth:14,boxHeight:12}},
         datalabels:{display:function(ctx){if(!showLabels)return false;const ds=ctx.dataset;if(ds.dl===false)return false;if(ds.lastIdx==null)return dense?(ctx.dataIndex===labels.length-1):true;return ctx.dataIndex===ds.lastIdx;},anchor:'end',align:'end',clamp:true,color:function(ctx){return ctx.dataset.borderColor||'#333'},font:{weight:'bold',size:labelSize||10},formatter:function(v){return typeof v==='number'?v.toFixed(1):v}}},
-      scales:{y:{beginAtZero:zeroBased!==false,grid:{color:'#f0f0f0'}},x:{grid:{display:false},ticks:{maxRotation:0,autoSkip:true,autoSkipPadding:6}}}}
+      scales:{y:{beginAtZero:zeroBased!==false,grid:{color:'#f0f0f0'}},x:{grid:{display:false},ticks:{maxRotation:0,autoSkip:true,autoSkipPadding:6}}}},
+    plugins:covPlugins
   });
 }
 /* 超尺寸各类别占当周期比例(%)，分母 = 已分类运单数（缺失尺寸字段行归普货，会拉高普货占比）
@@ -1537,7 +1551,7 @@ function regionRevAgg(dimField,fullLabels){
   const regs=[...regSet].sort(regionSort);
   const series=regs.map(function(reg,i){
     return {label:reg,color:REGION_COLORS[i%REGION_COLORS.length],
-      data:pl.map(function(p){const e=grid[reg+'|'+p];return (e&&e.oids.size)?+(e.rev/e.oids.size).toFixed(2):null})};
+      data:pl.map(function(p){const e=grid[reg+'|'+p];return (PERIOD_COV[p]>=95&&e&&e.oids.size)?+(e.rev/e.oids.size).toFixed(2):null})};
   }).filter(function(s){return s.label!=='未知' && s.data.some(function(v){return v!==null})});
   // 尾点数据标签：仅每大区最后一周期显示，避免 38 点全程标注造成重叠
   if(!fullLabels)series.forEach(function(s){s.lastIdx=lastIdxOf(s.data)});
@@ -1967,6 +1981,7 @@ function drawRegionDestPeriod(){
     const st=(r['目的站点']||'').toString().trim();
     if(!reg||!oHub||!dHub||!st||st==='--')return;
     const per=periodOf(r); if(!per)return;
+    if(!(PERIOD_COV[per]>=95))return;
     const oid=r._oid; const rv=parseFloat(r[COL_REV]);
     const leaf=nodeAt([reg,oHub,dHub,st]);
     let a=leaf.agg[per]; if(!a)a=leaf.agg[per]={rev:0,wb:new Set()};
@@ -2061,6 +2076,7 @@ function drawDestDrill(containerId,metric){
     const st=(r['目的站点']||'').toString().trim();
     if(!reg||!dHub||!st||st==='--')return;
     const per=periodOf(r); if(!per)return;
+    if(!(PERIOD_COV[per]>=95))return;
     const oid=r._oid; const rv=parseFloat(r[COL_REV]); const ct=parseFloat(r[COL_COST]);
     const hasRev=r[COL_REVHIT]==='是'&&!isNaN(rv); const hasCost=!isNaN(ct);
     const leaf=nodeAt([reg,dHub,st]);
@@ -2142,6 +2158,7 @@ function drawRevCustomer(){
   const m={},mo={};
   filteredData.forEach(function(r){
     if(!hasRevenue)return;
+    if(!(PERIOD_COV[periodOf(r)]>=95))return;
     const k=(r['客户简称']||'').toString().trim();if(!k)return;
     const rv=parseFloat(r[COL_REV]);
     if(!isNaN(rv))m[k]=(m[k]||0)+rv;
@@ -2270,6 +2287,7 @@ function drawCustWeightHeatmap(data,topN){
   const rev={};
   const getRev=function(k){if(!rev[k])rev[k]={oids:new Set(),tri:0};return rev[k];};
   data.forEach(function(r){
+    if(!(PERIOD_COV[periodOf(r)]>=95))return;
     const c=(r['客户简称']||'').toString().trim()||'未标注';
     const s=(r['重量段']||'').toString().trim();
     if(!c||!s)return;
@@ -2488,7 +2506,7 @@ function showLoadBanner(){
   }
 }
 /* 打开即自动加载默认数据源：通过 fetch 读取合并后的 CSV（需以本地 http 服务打开）。
-   数据规模约 2,072,450 行 / 473MB，无法内联为 data.js，故 file:// 双击方式不自动加载，
+   数据规模约 2,126,147 行 / ≈485MB，无法内联为 data.js，故 file:// 双击方式不自动加载，
    此时显示引导横幅，用户可点「导入」手动选择 CSV。 */
 function autoLoad(){
   const info=document.getElementById('dataInfo');
